@@ -1,0 +1,11 @@
+[run]
+source = mycc
+branch = True
+omit = mycc/__main__.py
+
+[report]
+show_missing = True
+exclude_lines =
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    \.\.\.

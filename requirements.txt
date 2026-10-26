@@ -1,0 +1,2 @@
+# Optional GUI only; compiler and CLI require no third-party packages.
+PySide6==6.8.3

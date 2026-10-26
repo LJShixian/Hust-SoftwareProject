@@ -1,0 +1,30 @@
+{
+  "name": "reference_base_novshift",
+  "description": "PF-03 base-novshift reference; built-in source of truth is core/isa.py",
+  "schema_version": 1,
+  "instructions": [
+    "add",
+    "addi",
+    "and",
+    "andi",
+    "beq",
+    "blt",
+    "bne",
+    "jal",
+    "jalr",
+    "lui",
+    "lw",
+    "or",
+    "ori",
+    "sb",
+    "slli",
+    "slt",
+    "slti",
+    "sltu",
+    "srai",
+    "srli",
+    "sub",
+    "sw",
+    "xori"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "reference_base_nolui",
+  "description": "PF-02 base-nolui reference; built-in source of truth is core/isa.py",
+  "schema_version": 1,
+  "instructions": [
+    "add",
+    "addi",
+    "and",
+    "andi",
+    "beq",
+    "blt",
+    "bne",
+    "jal",
+    "jalr",
+    "lw",
+    "or",
+    "ori",
+    "sb",
+    "sll",
+    "slli",
+    "slt",
+    "slti",
+    "sltu",
+    "sra",
+    "srai",
+    "srl",
+    "srli",
+    "sub",
+    "sw",
+    "xori"
+  ]
+}

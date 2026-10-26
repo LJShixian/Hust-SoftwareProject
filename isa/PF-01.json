@@ -1,0 +1,33 @@
+{
+  "name": "reference_base",
+  "description": "PF-01 base reference; built-in source of truth is core/isa.py",
+  "schema_version": 1,
+  "instructions": [
+    "add",
+    "addi",
+    "and",
+    "andi",
+    "beq",
+    "blt",
+    "bne",
+    "jal",
+    "jalr",
+    "lui",
+    "lw",
+    "or",
+    "ori",
+    "sb",
+    "sll",
+    "slli",
+    "slt",
+    "slti",
+    "sltu",
+    "sra",
+    "srai",
+    "srl",
+    "srli",
+    "sub",
+    "sw",
+    "xori"
+  ]
+}
