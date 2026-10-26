@@ -1,10 +1,43 @@
-# mycc — 可配置指令集的 C 子集编译器
+﻿# mycc — 可配置指令集的 C 子集编译器
+
+> **本分支为 `zjb`**：在 `main` 第一版 `8a5d050` 基础上修正后的 mycc 参考实现。改动与验证数据见 [本分支改动说明](#本分支改动说明)。
 
 mycc 0.3.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，生成 **GNU RISC-V 汇编、源码诊断和指令选择说明**。可在命令行使用，也可在 PySide6 工作台中编辑、编译和查看结果。
 
 当前产品边界见 [范围说明](docs/guides/scope.md)。常用入口是 `python -m mycc`；CPU21 固件构建是可选集成，需要显式选择。原 FPGA 扫雷项目继续由原有 GCC 流程构建。
 
-导航：[快速使用](#快速使用) · [目录结构](#目录结构) · [运行流程](#运行流程) · [实现方式](#实现方式) · [ISA 与语言范围](#isa-与语言范围) · [外部运行与验证](#外部运行与验证) · [文档索引](docs/README.md)
+导航：[本分支改动说明](#本分支改动说明) · [快速使用](#快速使用) · [目录结构](#目录结构) · [运行流程](#运行流程) · [实现方式](#实现方式) · [ISA 与语言范围](#isa-与语言范围) · [外部运行与验证](#外部运行与验证) · [文档索引](docs/README.md)
+
+## 本分支改动说明
+
+`main` 的 `8a5d050` 是第一版实现。本分支在其上 **修改 14 个文件、新增 2 个文件、删除 0 个文件**，目标是把实现对齐到需求与设计文档的要求。改动按主题分组：
+
+| 主题 | 位置 | 内容 |
+|---|---|---|
+| 指令选择可追溯 | `mycc/core/codegen.py`、`driver.py` | 新增 `LoweringRecord`，每条降级记录 `op`、源位置 `file:line:col`、选中理由、被拒方案（含缺失指令）、指令数增量 `delta`；`--dump-lowering-report` 输出 `位置` 与 `Δ指令` 两列 |
+| 诊断质量 | `mycc/core/parser.py` | 文件作用域出现语句时报 `E-PARSE-FILE-SCOPE`，并给出“放进函数体内”的修复建议，不再只说 `expected 'int' or 'void'` |
+| 诊断质量 | `mycc/core/sema.py` | 新增 `W-SEMA-INFINITE-RECURSION`：所有路径都再次调用自身的函数会被警告（只警告，不阻断代码生成） |
+| RARS 后端 | `mycc/rars.py`（新增）、`mycc/cli.py` | 新增 `--rars`，输出单个自包含 `.asm`：重写 `.section/.balign/.zero/.type/.size/.option` 等 RARS 不认的伪指令，重命名 `main` 并注入 `ecall` 退出，只追加程序真正用到的运行时 shim |
+| 文档一致性门禁 | `tools/check_docs.py`（新增）、`tools/check.py` | 校验 README 预设表、`configs/isa/presets/*.json` 与 `mycc/core/isa.py` 三者一致，并检查每个预设都满足 MV-ISA 下限；`check.py` 另生成 `build/reports/source-hashes.json` |
+| 工作台 | `mycc/gui/views.py`、`workbench.py` | 移除与菜单重复的工具栏；`导出当前页` 按当前标签页决定格式；菜单项/标签页/ISA 复选框悬停即在状态栏解释；`取消` 仅编译中可用 |
+| 能力配置修复 | `mycc/gui/workbench.py` | `normalize_capabilities`：只保存相对预设的差异，修正取消勾选后 PF-01 被持久化成 22 条指令的问题 |
+| 回归工具健壮性 | `tools/verify_cpu21.py` | 源码哈希改为 UTF-8 解码 + 无 `rg` 时回退遍历（原实现在中文文件名上崩）；新增 ASCII 暂存目录，绕开 Vivado `-testplusarg` 无法承载非 ASCII 路径的限制 |
+| 边界检查 | `tools/check_architecture.py` | 导入白名单加入 `rars` |
+| 测试 | `tests/test_compiler.py`、`test_workbench.py` | 新增 8 组用例：文件作用域诊断、无穷递归（含 4 个不应误报的终止递归）、RARS 伪指令与 shim 裁剪、构建可重现性、能力指纹、降级报告位置与代价、能力差异相对预设 |
+| 文档 | `README.md`、`docs/guides/scope.md` | 更新工作台、语义分析、RARS 相关描述与实测数字 |
+
+### 验证结果（2026-10-26 实测）
+
+| 项目 | 结果 |
+|---|---|
+| `\check.cmd` | `131 passed, 1 skipped`，退出码 0 |
+| 覆盖率 | 语句 92%，门槛通过 |
+| 架构与文档门禁 | `architecture: ok`、`docs: preset table and JSON reference sets agree with core/isa.py` |
+| CPU21 真实 RTL 回归 | **18/18 通过**，81.8 s，每例校验 600 个 VGA 打包字 |
+| 只读保证 | 外部 FPGA 工程 84 个文件 SHA-256 前后一致，0 变更 |
+| RARS 1.5 | 8 个示例全部汇编通过（0 错误 0 警告）且运行结果正确 |
+
+未验证项：本机无 `qemu-riscv32`，执行与 GCC 对照仍未跑；CPU21 只做了 xsim 行为级仿真，**没有物理上板证据**，不覆盖时序收敛与板级电平。
 
 ## 快速使用
 
@@ -48,6 +81,7 @@ SoftwareEngineering/
 ├─ launch.cmd / check.cmd          Windows GUI / 检查快捷入口
 ├─ mycc/                           编译器软件
 │  ├─ __main__.py / cli.py         模块入口、参数解析和文件读写
+│  ├─ rars.py                      RARS 1.5 单文件 .asm 导出
 │  ├─ core/                       标准库实现的七模块编译内核
 │  │  ├─ types.py                 类型、AST、诊断、选项及结果结构
 │  │  ├─ lexer.py                 C 文本 → Token
@@ -76,6 +110,7 @@ SoftwareEngineering/
 ├─ tools/                          python -m tools.* 开发工具
 │  ├─ build.py                    GNU 汇编/链接及固件导出
 │  ├─ check.py                    测试、覆盖率与可选外部验证
+│  ├─ check_docs.py                README 预设表、JSON 参考集与 isa.py 一致性
 │  ├─ verify_cpu21.py             只读加载原始 RTL，运行固件回归
 │  ├─ compare.py                  QEMU 中对照 mycc 与 GCC 行为
 │  ├─ check_architecture.py       模块依赖边界检查
@@ -155,7 +190,7 @@ mycc .s + 软件辅助函数 + I/O + 目标启动代码
 
 CPU21 需要专门适配，因为它采用 Harvard 结构，ROM/RAM、VGA 协议和退出方式都有具体约束。仅选择相同 ISA 无法自动解决这些条件。`--profile cpu21` 只选择指令集合，`--target cpu21` 才加载适配策略。
 
-输出为 GNU 汇编，使用 `.section`、`.type`、`%hi/%lo` 等语法，**不保证可直接交给原来的 RARS JAR**。RARS 兼容后端已在范围说明中暂缓。
+输出为 GNU 汇编，使用 `.section`、`.type`、`%hi/%lo` 等语法，**不保证可直接交给原来的 RARS JAR**。但 RARS 并不要自己写：`mycc --rars` 会输出一份 RARS 可直接汇编并运行的单文件 `.asm`（重写 RARS 不认的指示字、内联软件算术辅助、把 `putchar`/`printint`/`printhex`/`exit` 换成 ecall）。它面向仿真，不包含板卡地址与 MMIO；需要真实目标布局时仍用 `tools.build`。
 
 ## 实现方式
 
@@ -163,7 +198,7 @@ CPU21 需要专门适配，因为它采用 Harvard 结构，ROM/RAM、VGA 协议
 |---|---|
 | 词法分析 | Python 正则扫描，跳过注释和空白，Token 保存源码位置 |
 | 语法分析 | 声明/语句用递归下降，表达式按优先级解析，形成 AST |
-| 语义分析 | 函数与块作用域、符号和类型检查、调用及控制流约束 |
+| 语义分析 | 函数与块作用域、符号和类型检查、调用及控制流约束；直接无终止递归（每条路径都再次调用自身）报 `W-SEMA-INFINITE-RECURSION` 警告 |
 | 数据与调用 | 32 位 int、单层 int 指针、一维数组，ILP32 数据/调用约定 |
 | 代码生成 | 遍历 AST 直接输出汇编；栈保存局部值及中间结果，s0 帧指针、16 字节栈对齐、a0–a7 参数寄存器 |
 | ISA 回退 | 根据能力选择硬件指令、等价指令序列或运行时辅助调用 |
@@ -179,7 +214,7 @@ CPU21 通过通用 `CodegenPolicy` 和外部函数签名注入 BSS 初始化、�
 
 ### GUI 工作台
 
-GUI 支持源码打开/保存、ISA 预设与组选择、F5 编译、取消、诊断双击定位和 Ctrl+Shift+E 导出。结果页有汇编、Token、AST、IR 和 Lowering。后台线程编译，主线程更新界面；源码或 ISA 修改后标记已有结果过期。
+GUI 的所有命令集中在菜单栏，不再重复提供工具栏按钮。Ctrl+N/O/S 打开保存、F5 编译、Ctrl+Shift+E 导出。“取消编译”只在编译过程中可用。导出只有一个“导出当前页”：按当前选中的结果页决定存成 `.s`、`.md` 还是 `.txt`。把鼠标停在菜单项、结果页签或 ISA 复选框上，状态栏左侧会显示该项的功能说明。结果页有汇编、Token、AST、IR 和 Lowering。后台线程编译，主线程更新界面；源码或 ISA 修改后标记已有结果过期。
 
 外部构建/仿真通过帮助中的终端命令执行。GUI 设置在 `~/.config/mycc/gui.json`，格式 `schema_version=2`；旧板卡设置保留于 `legacy`。见 [工作台截图](docs/images/workbench.png)。
 
@@ -223,6 +258,9 @@ CLI 退出码：`0` 成功，`1` 编译失败，`2` 内部错误，`64` 参数/I
 | [QEMU](adapters/qemu/README.md) | RISC-V GNU 工具、qemu-riscv32；对照另需 GCC | Linux-user 启动和系统调用，不表示 FPGA 支持这些调用 |
 
 ```powershell
+# RARS：单文件、可直接汇编并运行（仿真用，不含板卡地址）
+python -m mycc examples/compiler/muldiv.c --rars -o build/muldiv.asm
+
 # CPU21 完整固件：编译时选择地址配置
 python -m tools.build examples/compiler/compiler_demo.c --target cpu21 --board-file adapters/cpu21/board.json -o build/cpu21-demo
 
@@ -242,9 +280,11 @@ python -m tools.check_isa_consistency adapters/cpu21/hw_caps.json --profile cpu2
 
 CPU21 输出 `.s`、中间 `.o`、`.elf`、`.bin`、`.hex`、`.vh`、Logisim 镜像和 manifest。JSON 地址必须符合硬件实际译码；软件可配置不代表硬件地址随之改变。CPU21 无 UART，输出走 VGA，退出状态写 LED/SEG。
 
-本次整理后常规检查为 **115 passed、1 skipped**，覆盖率门槛通过。检查包括错误恢复、输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵。本机缺少 `qemu-riscv32`，执行/GCC 对照仍未验证；`--full` 将缺工具作为失败。
+本次整理后常规检查为 **131 passed、1 skipped**，覆盖率 92% 且门槛通过。检查包括错误恢复、输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵。本机缺少 `qemu-riscv32`，执行/GCC 对照仍未验证；`--full` 将缺工具作为失败。
 
-CPU21 回归检查退出状态、VGA 600 个打包显存字、控制寄存器与栈故障行为，并对比外部工程前后文件哈希。本次整理后 **18 项回归全部通过，外部 81 个文件哈希一致**，见 [本次验证记录](docs/verification/layout-results-2026-10-26.json)。此前 [0.3.0 范围验收](docs/verification/scope-results-0.3.0-2026-10-26.json) 保留；新运行输出写 `build/cpu21-verification/`。
+CPU21 回归检查退出状态、VGA 600 个打包显存字、控制寄存器与栈故障行为，并对比外部工程前后文件哈希。本次整理后 **18 项回归全部通过，外部 84 个文件哈希一致**，见 [本次验证记录](docs/verification/layout-results-2026-10-26.json) 与 [CPU21 周期数据](docs/verification/cpu21-results-2026-10-26.json)。此前 [0.3.0 范围验收](docs/verification/scope-results-0.3.0-2026-10-26.json) 保留；新运行输出写 `build/cpu21-verification/`。
+
+Vivado 的 `-testplusarg` 经 Windows 批处理包装后无法承载非 ASCII 路径，因此输出目录含中文时，回归会把 ROM 暂存到 `%TEMP%\mycc-cpu21-sim` 再仿真，结束后把结果回拷；调用方无需关心路径。
 
 工具不回写 `D:\Xilinx\Project\risc-v`，不生成或下载 bitstream。仿真与物理上板属于不同验证层次。
 

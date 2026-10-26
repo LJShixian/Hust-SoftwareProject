@@ -1,5 +1,6 @@
 """One-command checks; --full makes unavailable external tools a failure."""
 import argparse
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -7,7 +8,29 @@ import shutil
 import subprocess
 import sys
 from .check_architecture import check
+from .check_docs import check as docs_check
 from .build import ROOT,tool
+
+
+def source_hashes():
+    """Digest every input that can change the artifact, plus the committed specs.
+
+    A report is only evidence if it names the tree it was produced from, so this
+    manifest is written next to the coverage report on every run.
+    """
+    paths=[]
+    for folder in ('mycc','adapters','tools','runtime','configs','examples','tests','scripts'):
+        paths.extend(sorted((ROOT/folder).rglob('*')))
+    paths.extend(sorted((ROOT/'docs/specs').rglob('*.md')))
+    paths.extend(ROOT/name for name in ('README.md','pyproject.toml','requirements.txt','THIRD_PARTY.md'))
+    digests={}
+    for path in paths:
+        if not path.is_file() or '__pycache__' in path.parts: continue
+        digests[str(path.relative_to(ROOT)).replace('\\','/')]=hashlib.sha256(path.read_bytes()).hexdigest()
+    trees=hashlib.sha256(json.dumps(digests,sort_keys=True).encode()).hexdigest()
+    payload={'schema':'mycc-source-hashes/1','file_count':len(digests),'tree':trees,'files':digests}
+    (ROOT/'build/reports/source-hashes.json').write_text(json.dumps(payload,indent=1,sort_keys=True),encoding='utf-8')
+    return payload
 
 
 def main():
@@ -20,6 +43,10 @@ def main():
     if errors:
         print('\n'.join(errors)); return 1
     print('architecture: ok',flush=True)
+    drift=docs_check()
+    if drift:
+        print('\n'.join(drift)); return 1
+    print('docs: preset table and JSON reference sets agree with core/isa.py',flush=True)
     if args.full:
         try: tool('as'); tool('gcc')
         except RuntimeError as exc: print(exc); return 1
@@ -45,6 +72,8 @@ def main():
             if percent<minimum: print(f'coverage gate failed: {name} {percent:.1f}% < {minimum}%'); return 1
         if summary('mycc/core/')[1]<60: print('core branch coverage below 60%'); return 1
         print('coverage gates: ok')
+        manifest=source_hashes()
+        print(f'source hashes: {manifest["file_count"]} files, tree {manifest["tree"][:16]}')
     elif args.full:
         print('coverage is required for full acceptance'); return 1
     if not shutil.which('qemu-riscv32'):

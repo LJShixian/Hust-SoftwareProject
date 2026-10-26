@@ -79,5 +79,13 @@ def dump_tokens(result): return result.tokens_text
 def dump_ast(result): return result.ast_text
 def dump_ir(result): return result.ir_text
 def dump_lowering_report(result):
-    return ''.join(f'{i}\t{op}: {reason}\n'+''.join(f'  rejected: {x}\n' for x in rejected)
-                   for i,(op,reason,rejected) in enumerate(result.lowering))
+    """One line per decision: op, source position, selected rule, cost premium.
+
+    Position and delta make the report answerable against the source, and rejected
+    rules are named together with the capability they were missing.
+    """
+    out=[]
+    for i,rec in enumerate(result.lowering):
+        out.append(f'{i}\t{rec.op}\t{rec.location}\t{rec.reason}\tdelta={rec.delta:+d}\n')
+        out.extend(f'  rejected: {x}\n' for x in rec.rejected)
+    return ''.join(out)

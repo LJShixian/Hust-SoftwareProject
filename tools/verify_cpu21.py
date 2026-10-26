@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from mycc import core
 from .build import ROOT,build
@@ -15,9 +16,25 @@ DEFAULT_FPGA=Path(os.environ.get('MYCC_CPU21_ROOT',r'D:\Xilinx\Project\risc-v'))
 
 
 def snapshot(root):
-    """Hash tracked and unignored files without importing/running project code."""
-    names=subprocess.check_output(['rg','--files','--hidden','-g','!.git',str(root)],text=True).splitlines()
-    return {str(Path(name).relative_to(root)):hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in names}
+    """Hash tracked and unignored files without importing/running project code.
+
+    `rg` is not a documented dependency and its output is UTF-8, while the system
+    codec on a Chinese Windows install is GBK: decoding with the locale raises as
+    soon as the tree contains a non-ASCII filename. Decode as UTF-8, and fall back
+    to a plain walk when ripgrep is unavailable.
+    """
+    root = Path(root)
+    if shutil.which('rg'):
+        listing = subprocess.check_output(['rg', '--files', '--hidden', '-g', '!.git', str(root)],
+                                          text=True, encoding='utf-8', errors='replace')
+        names = [line for line in listing.splitlines() if line.strip()]
+    else:
+        names = []
+        for path in root.rglob('*'):
+            if path.is_file() and '.git' not in path.relative_to(root).parts:
+                names.append(str(path))
+    return {str(Path(name).relative_to(root)): hashlib.sha256(Path(name).read_bytes()).hexdigest()
+            for name in names}
 
 
 def run_command(args,cwd,log,timeout=60):
@@ -56,6 +73,22 @@ OUTPUTS={
 }
 
 
+def ascii_stage(out):
+    """Return a simulator I/O directory whose path is pure ASCII, or None.
+
+    xsim receives the ROM and framebuffer paths through -testplusarg, which is
+    handled by a Windows batch wrapper that mangles non-ASCII characters: a repo
+    under a Chinese path silently loads no ROM and the CPU then runs off the end
+    of memory. Staging the files on an ASCII path keeps the documented default
+    output directory usable.
+    """
+    if all(ord(ch) < 128 for ch in str(out)):
+        return None
+    stage = Path(tempfile.gettempdir()) / 'mycc-cpu21-sim'
+    stage.mkdir(parents=True, exist_ok=True)
+    return stage
+
+
 def verify(root=DEFAULT_FPGA,output=None,cases=None):
     root=Path(root).resolve(); out=Path(output or ROOT/'build/cpu21-verification').resolve()
     if out==root or out.is_relative_to(root): raise ValueError('verification output must not be inside the FPGA project')
@@ -74,14 +107,22 @@ def verify(root=DEFAULT_FPGA,output=None,cases=None):
             profile=core.load_profile('cpu21',disable=disabled)
             stem=out/f'{index:02}-{name}'
             elf=build(ROOT/'examples'/('cpu21' if name.startswith('cpu21_') else 'compiler')/f'{name}.c',profile,output=stem,target='cpu21')
-            fb=stem.with_suffix('.fb.hex'); log=stem.with_suffix('.xsim.log')
+            stage=ascii_stage(out)
+            if stage:
+                rom=stage/f'{index:02}-rom.hex'; fb=stage/f'{index:02}-fb.hex'; log=stage/f'{index:02}-xsim.log'
+                shutil.copyfile(elf.with_suffix('.hex'),rom)
+            else:
+                rom=elf.with_suffix('.hex'); fb=stem.with_suffix('.fb.hex'); log=stem.with_suffix('.xsim.log')
             # The option file preserves '=' through Vivado's Windows batch wrapper.
             args=stem.with_suffix('.args')
-            args.write_text(f'-runall\n-testplusarg ROM={elf.with_suffix(".hex").as_posix()}\n-testplusarg FB={fb.as_posix()}\n-log {log.as_posix()}\n',encoding='utf-8')
+            args.write_text(f'-runall\n-testplusarg ROM={rom.as_posix()}\n-testplusarg FB={fb.as_posix()}\n-log {log.as_posix()}\n',encoding='utf-8')
             console=run_command([tools['xsim'],'cpu21_program','-f',args],out,stem.with_suffix('.console.txt'))
             result=re.search(r'CPU21_RESULT=(\d+) CYCLES=(\d+) CURSOR=([0-9a-f]+) CTRL=([0-9a-f]+)',console)
             if not result: raise RuntimeError(f'{name}: simulation did not reach exit; see {log}')
             actual=[int(line.strip(),16) for line in fb.read_text().splitlines() if re.fullmatch(r'[0-9a-fA-F]{8}',line.strip())]
+            if stage:
+                shutil.copyfile(fb,stem.with_suffix('.fb.hex'))
+                if log.exists(): shutil.copyfile(log,stem.with_suffix('.xsim.log'))
             expected=expected_screen(OUTPUTS[name])
             if name=='cpu21_vga':
                 expected[0]=0x02110110; expected[599]=0x07290000

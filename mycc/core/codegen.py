@@ -14,6 +14,28 @@ def rule(requires, lines, reason):
     return Rule(frozenset(requires.split()),tuple(lines.split(';')),reason)
 
 
+@dataclass(frozen=True)
+class LoweringRecord:
+    """One AO -> selected rule decision, with the evidence an external review needs.
+
+    `delta` is the instruction-count premium over the best rule in the table, so a
+    reader can tell how much a capability fallback actually costs. `rejected`
+    keeps one entry per rule that was skipped and why, including rules disabled by
+    a missing capability rather than by precedence.
+    """
+    op: str
+    reason: str
+    rejected: tuple = ()
+    delta: int = 0
+    file: str = ''
+    line: int = 0
+    col: int = 0
+
+    @property
+    def location(self):
+        return f'{self.file}:{self.line}:{self.col}' if self.line else '-'
+
+
 LOWERING_TABLE = {
     'MUL': (rule('mul','mul a0,t0,a0','hardware multiplication'),
             rule('','addi a1,a0,0;addi a0,t0,0;jal ra,__mulsi3','mul unavailable; software multiplication')),
@@ -39,8 +61,18 @@ class Generator:
         self.library=options is not None and not options.require_main
         self.global_initializers=[]
         self.serial=0; self.lowering=[]; self.ir=[]; self.loops=[]
+        self.node=None
 
     def emit(self,*lines): self.lines.extend(lines)
+
+    def node_of(self):
+        token=getattr(self.node,'token',None)
+        return (token.file,token.line,token.col) if token is not None else ('',0,0)
+
+    def record(self,op,reason,rejected=(),delta=0):
+        """Append one decision with its source position and cost premium."""
+        f,l,c=self.node_of()
+        self.lowering.append(LoweringRecord(op,reason,tuple(rejected),delta,f,l,c))
 
     def label(self,stem='label'):
         self.serial+=1
@@ -51,14 +83,15 @@ class Generator:
 
     def choose(self,op):
         self.mark(op)
+        rules=LOWERING_TABLE[op]
         rejected=[]
-        for r in LOWERING_TABLE[op]:
+        for r in rules:
             missing=r.requires-self.profile.instructions
             if not missing:
-                self.lowering.append((op,r.reason,tuple(rejected)))
+                self.record(op,r.reason,rejected,len(r.lines)-len(rules[0].lines))
                 self.emit(*r.lines)
                 return
-            rejected.append('missing '+', '.join(sorted(missing)))
+            rejected.append(f"{r.reason} (missing {', '.join(sorted(missing))})")
         raise RuntimeError('unreachable: missing fallback for '+op)
 
     def const(self,value,rd='a0'):
@@ -68,26 +101,30 @@ class Generator:
         if self.profile.has('lui'):
             hi=(value+0x800)>>12; lo=value-(hi<<12)
             self.emit(f'lui {rd},{hi & 0xfffff}',f'addi {rd},{rd},{lo}')
-            self.lowering.append(('CONST32','lui + signed low 12 bits',()))
+            self.record('CONST32','lui + signed low 12 bits')
         else:
             v=value & 0xffffffff
             self.emit(f'addi {rd},zero,{v >> 24}')
             for shift in (16,8,0): self.emit(f'slli {rd},{rd},8',f'addi {rd},{rd},{(v>>shift)&255}')
-            self.lowering.append(('CONST32','lui unavailable; byte synthesis',('missing lui',)))
+            self.record('CONST32','lui unavailable; byte synthesis',
+                        ('lui + signed low 12 bits (missing lui)',),7)
 
     def address(self,symbol,rd='a0'):
         self.mark('ADDRESS',symbol.name)
         if symbol.global_:
             if self.profile.has('lui'):
                 self.emit(f'lui {rd},%hi({symbol.name})',f'addi {rd},{rd},%lo({symbol.name})')
+                self.record('ADDRESS','lui %hi/%lo')
             elif self.policy.data_address_bits:
                 shift=32-self.policy.data_address_bits
                 self.emit(f'addi {rd},zero,%lo({symbol.name})',f'slli {rd},{rd},{shift}',f'srli {rd},{rd},{shift}')
-                self.lowering.append(('ADDRESS','bounded RAM address via relocations; no ROM loads',('missing lui',)))
+                self.record('ADDRESS','bounded RAM address via relocations; no ROM loads',
+                            ('lui %hi/%lo (missing lui)',),1)
             else:
                 pc,done=self.label('pc'),self.label('addr')
                 self.emit(f'jal {rd},{pc}',pc+':',f'lw {rd},8({rd})',f'jal zero,{done}',f'.word {symbol.name}',done+':')
-                self.lowering.append(('ADDRESS','lui unavailable; PC literal address',('missing lui',)))
+                self.record('ADDRESS','lui unavailable; PC literal address',
+                            ('lui %hi/%lo (missing lui)',),2)
         else:
             self.const(symbol.offset,rd)
             self.emit(f'add {rd},s0,{rd}')
@@ -144,6 +181,7 @@ class Generator:
             if op in ('<=','>='): self.emit('xori a0,a0,1')
 
     def expression(self,n):
+        self.node=n
         k=n.kind
         if k in ('num','sizeof'): self.const(n.value)
         elif k in ('id','index') or (k=='unary' and n.value=='*'):
@@ -160,7 +198,7 @@ class Generator:
             if n.value!='=':
                 self.emit('lw a0,0(a0)'); self.push()
                 self.expression(b); self.pop()
-                self.binary(n.value[:-1],a.type,b.type)
+                self.node=n; self.binary(n.value[:-1],a.type,b.type)
             else: self.expression(b)
             self.pop(); self.emit('sw a0,0(t0)')
         elif k=='postfix' or (k=='unary' and n.value in ('++','--')):
@@ -188,9 +226,10 @@ class Generator:
                 self.const(0 if n.value=='&&' else 1); self.emit(done+':')
             else:
                 self.expression(a); self.push(); self.expression(b); self.pop()
-                self.binary(n.value,a.type,b.type)
+                self.node=n; self.binary(n.value,a.type,b.type)
 
     def statement(self,n):
+        self.node=n
         self.mark(n.kind.upper())
         if n.kind=='block':
             for child in n.children: self.statement(child)

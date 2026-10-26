@@ -14,7 +14,7 @@
                              GNU 汇编/链接 → 仿真或 FPGA
 ```
 
-第一阶段只维护 GNU 汇编输出。RARS 格式兼容暂缓；现有 .s 不宣称可直接交给 RARS。原扫雷继续由其既有 GCC 工具链构建，不作为 mycc 必须原样编译通过的输入。
+编译器本身只产生 GNU 汇编。在那个文件之外，`mycc --rars` 会把同一份列示重写为 **RARS 可汇编、可直接运行的单文件 .asm**：把 `.section .text` 改成 `.text`、内联 `runtime/runtime.s` 的软件算术辅助函数，并把 `putchar`/`printint`/`printhex`/`exit` 换成 ecall shim。它面向用 RARS 做课设仿真的场合，**不**代替 GNU 链路，也不包含板卡地址布局与 MMIO——需要真实目标布局时仍然走 `tools.build`。原扫雷继续由既有 GCC 工具链构建，不作为 mycc 必须原样编译通过的输入。
 
 ## 2. 范围边界
 
@@ -25,7 +25,7 @@
 | 编译输出约定 | GNU 汇编；外部函数/软件辅助函数由运行时提供。生成 .s 不等于独立可执行文件 |
 | 外部适配 | 启动入口、最终内存地址、链接布局、MMIO、VGA 字形、ROM 导出、CPU21 栈故障策略、RTL 集成验证，集中在 adapters/cpu21 及外部工具中 |
 | 开发验证 | 纯 Python 测试、真实汇编/链接、ISA 组合、可选 QEMU/GCC 对照、显式 CPU21 RTL 验证；不作为正常编辑/编译的前置条件 |
-| 暂缓 | 完整扫雷、unsigned/volatile/预处理/内联汇编/ISR 语言支持、RARS 后端、自动下载 FPGA、调试器和更多板卡 |
+| 暂缓 | 完整扫雷、unsigned/volatile/预处理/内联汇编/ISR 语言支持、自动下载 FPGA、调试器和更多板卡 |
 
 已支持的 int/int*/一维数组、函数、控制流和运算符继续保留。本次不通过删语言功能来缩小范围。
 

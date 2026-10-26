@@ -1,6 +1,6 @@
 from mycc import core
 from mycc.gui.workbench import (WorkbenchState,build_request,apply_result,export_asm_diag_lowering,
-    source_offset,load_settings,save_settings)
+    source_offset,load_settings,save_settings,normalize_capabilities)
 
 
 def test_cli_gui_shared_results():
@@ -36,6 +36,19 @@ def test_offsets_exports():
     assert source_offset('',1,1)==0
     state=WorkbenchState(path='path with spaces.c',enable=['div'],disable=['lui'])
     assert export_asm_diag_lowering(state)==('','','')
+
+
+def test_capability_differences_are_relative_to_the_preset():
+    """Only real differences from the preset may be persisted.
+
+    Regression: every unchecked box used to be written into `disable`, including
+    groups the preset never contained. PF-01 then reopened as 22 instructions
+    instead of 26 while the combo still said PF-01.
+    """
+    assert normalize_capabilities('PF-01',[],['mul','divrem','xor','cmpbr','byteload','auipc','lui','vshift'])==([],['lui','vshift'])
+    assert normalize_capabilities('PF-01',['mul','lui'],[])==(['mul'],[])
+    assert normalize_capabilities('PF-05',['mul'],[])==([],[])
+    assert normalize_capabilities('PF-05',['mul'],['mul'])==([],['mul'])
 
 
 def test_offscreen_window(tmp_path,monkeypatch):

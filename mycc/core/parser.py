@@ -16,8 +16,9 @@ class Parser:
     def t(self):
         return self.tokens[self.pos]
 
-    def error(self, message, code="E-PARSE-EXPECTED-TOKEN"):
-        fail(self.reporter, self.t, 'parse', code, message, "check the C subset grammar in README.md")
+    def error(self, message, code="E-PARSE-EXPECTED-TOKEN", note=None):
+        fail(self.reporter, self.t, 'parse', code, message,
+             note or "check the C subset grammar in README.md")
 
     def take(self, kind=None):
         t = self.t
@@ -73,6 +74,13 @@ class Parser:
     def program(self):
         out = Node('program', self.t)
         while self.t.kind != 'eof':
+            if self.t.kind not in ('int', 'void'):
+                # A statement or expression at file scope used to surface as the
+                # generic "expected 'int' or 'void'", which reads like a broken
+                # type rather than "this code has to live inside a function".
+                self.error(f"only declarations may appear at file scope; '{self.t.text}' begins a statement or expression",
+                           'E-PARSE-FILE-SCOPE',
+                           'move it inside a function body, for example int main(void) { ... }')
             typ = self.typename()
             name = self.take('id')
             if self.accept('('):

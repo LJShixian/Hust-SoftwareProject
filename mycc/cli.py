@@ -9,6 +9,7 @@ import sys
 import tempfile
 from . import __version__
 from . import core
+from .rars import convert as to_rars
 
 
 class ArgumentParser(argparse.ArgumentParser):
@@ -24,6 +25,8 @@ def parser():
     p.add_argument('--version',action='version',version=f'mycc {__version__} | Python {sys.version_info.major}.{sys.version_info.minor} | ISA schema 1')
     external=p.add_argument_group('可选外部适配（普通编译无需设置）')
     external.add_argument('--target',choices=['generic','cpu21'],default='generic')
+    external.add_argument('--rars',action='store_true',
+                          help='emit one self-contained .asm for the RARS simulator instead of GNU assembly')
     p.add_argument('--profile',default=None)
     p.add_argument('--isa-file')
     p.add_argument('--enable',action='append',default=[])
@@ -84,6 +87,11 @@ def run(argv=None):
         from .gui.app import launch
         return launch(args.source)
     if not args.source and not (args.dump_isa or args.dump_isa_whitelist): p.error('provide one .c source file, --gui, --doctor or --dump-isa')
+    if args.rars and args.target != 'generic':
+        # The RARS file has no board addresses or MMIO; claiming a board target
+        # would silently drop the layout the user asked for.
+        print('mycc: error: --rars cannot be combined with --target '+args.target
+              +'; RARS output is a single generic listing',file=sys.stderr); return 64
     try: profile=profile_from_args(args)
     except core.ProfileError as exc:
         print(f'mycc: error: {exc}',file=sys.stderr); return exc.exit_code
@@ -113,7 +121,8 @@ def run(argv=None):
     if args.stats:
         for stage,ms in result.stages_ms.items(): print(f'{stage}\t{ms:.3f}',file=sys.stderr)
     if not result.success: return 1
-    try: atomic_write(args.o,result.asm)
+    text=to_rars(result.asm) if args.rars else result.asm
+    try: atomic_write(args.o,text)
     except OSError as exc:
         print(f'mycc: error: cannot write {args.o}: {exc}',file=sys.stderr); return 70
     return 0

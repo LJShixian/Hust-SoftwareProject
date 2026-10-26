@@ -174,6 +174,32 @@ class Analyzer:
             try: n.symbol.initial = [constant(x) for x in n.children]
             except (ValueError,KeyError) as exc: self.error(n,str(exc),'E-SEMA-CONSTANT')
 
+    def _contains_self_call(self, node):
+        """True when the subtree makes a direct call to the enclosing function."""
+        target = getattr(self.function, 'symbol', None)
+        if target is None: return False
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if current.kind == 'call' and current.symbol is target: return True
+            stack.extend(getattr(current, 'children', ()) or ())
+        return False
+
+    def _exits_without_self_call(self, node):
+        """True when some path can leave the function without calling itself.
+
+        `return f(x)` does not count as an exit: the value is only available after
+        the recursive call returns, which it never does. A `return` of a
+        self-call-free expression does, and so does a return inside an if branch or
+        a loop body.
+        """
+        kind = node.kind
+        if kind == 'return': return not self._contains_self_call(node)
+        if kind == 'block': return any(self._exits_without_self_call(c) for c in node.children)
+        if kind == 'if': return any(self._exits_without_self_call(c) for c in node.children[1:])
+        if kind in ('while', 'for'): return self._exits_without_self_call(node.children[-1])
+        return False
+
     def program(self, prog, require_main=True):
         defined=set()
         for n in prog.children:
@@ -192,6 +218,12 @@ class Analyzer:
             self.function = n; self.locals = []; self.scopes.append({})
             for p in n.children[:-1]: self.declare(p)
             self.statement(n.children[-1],False)
+            body = n.children[-1]
+            if self._contains_self_call(body) and not self._exits_without_self_call(body):
+                t = n.token
+                self.reporter.report(Diagnostic(t.file,t.line,t.col,'W-SEMA-INFINITE-RECURSION',
+                    f"'{n.symbol.name}' never returns: every path calls it again",
+                    'sema','warning',note='add a base case, or guard the recursive call with a condition'))
             n.value = {'name':n.symbol.name,'locals':list(self.locals)}
             self.scopes.pop()
             if n.type != VOID and not self.returns(n.children[-1]):

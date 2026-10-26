@@ -19,7 +19,7 @@ def check():
                 top=name.split('.')[0]
                 if (is_core or is_cli) and top=='PySide6': errors.append(f'{rel}: Qt outside GUI')
                 if is_core and top in ('cli','gui','adapters'): errors.append(f'{rel}: frontend/adapter dependency')
-                if top and top not in sys.stdlib_module_names and top not in ('mycc','PySide6','core','types','lexer','parser','sema','isa','codegen','driver','workbench','views','app','cli','gui','adapters'):
+                if top and top not in sys.stdlib_module_names and top not in ('mycc','PySide6','core','types','lexer','parser','sema','isa','codegen','driver','workbench','views','app','cli','gui','adapters','rars'):
                     errors.append(f'{rel}: dependency outside allowlist: {name}')
                 if is_core and isinstance(node,ast.ImportFrom) and node.level==1:
                     graph.setdefault(path.stem,set()).add(top)

@@ -39,6 +39,21 @@ def build_request(state):
                           core.load_profile(state.baseline,state.enable,state.disable),core.CompileOptions())
 
 
+def normalize_capabilities(baseline,enable=(),disable=()):
+    """Reduce enable/disable to the difference from the selected preset.
+
+    A checkbox for a group the preset never contained is not a user decision, so
+    recording it in `disable` makes the setting ambiguous: it persists across
+    sessions and then removes capabilities the preset does provide. Keeping only
+    real differences means PF-01 always means 26 instructions until the user
+    explicitly turns something off.
+    """
+    base=core.load_profile(baseline).instructions
+    keep_enable=[name for name in enable if not core.GROUPS[name]<=base]
+    keep_disable=[name for name in disable if core.GROUPS[name]<=base]
+    return keep_enable,keep_disable
+
+
 def apply_result(state,res):
     state.result=res
     if res.success: state.last_asm=res.asm
@@ -53,8 +68,9 @@ def export_asm_diag_lowering(state):
     res=state.result
     if res is None: return state.last_asm,'',''
     diag=''.join(core.format_with_caret(d,res.source or core.SourceFile(state.text,state.path)) for d in res.diagnostics)
-    md='| Operation | Selected lowering | Rejected |\n|---|---|---|\n'
-    md+=''.join(f'| {op} | {reason} | {", ".join(rej)} |\n' for op,reason,rej in res.lowering)
+    md='| # | Operation | 位置 | Selected lowering | Rejected | Δ指令 |\n|---|---|---|---|---|---|\n'
+    md+=''.join(f'| {i} | {r.op} | {r.location} | {r.reason} | {", ".join(r.rejected)} | {r.delta:+d} |\n'
+                for i,r in enumerate(res.lowering))
     return state.last_asm,diag,md
 
 
