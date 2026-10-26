@@ -73,7 +73,7 @@ def verify(root=DEFAULT_FPGA,output=None,cases=None):
         for index,(name,disabled) in enumerate(cases):
             profile=core.load_profile('cpu21',disable=disabled)
             stem=out/f'{index:02}-{name}'
-            elf=build(ROOT/'bench'/f'{name}.c',profile,output=stem,target='cpu21')
+            elf=build(ROOT/'examples'/('cpu21' if name.startswith('cpu21_') else 'compiler')/f'{name}.c',profile,output=stem,target='cpu21')
             fb=stem.with_suffix('.fb.hex'); log=stem.with_suffix('.xsim.log')
             # The option file preserves '=' through Vivado's Windows batch wrapper.
             args=stem.with_suffix('.args')

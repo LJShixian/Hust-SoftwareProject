@@ -15,7 +15,7 @@ def main():
     p.add_argument('--cpu21',action='store_true',help='verify production firmware on original CPU21 RTL')
     p.add_argument('--fpga-root',type=Path)
     args=p.parse_args()
-    (ROOT/'build').mkdir(exist_ok=True)
+    (ROOT/'build/reports').mkdir(parents=True,exist_ok=True)
     errors=check()
     if errors:
         print('\n'.join(errors)); return 1
@@ -31,8 +31,8 @@ def main():
     if code: return code
     if measured:
         subprocess.run([sys.executable,'-m','coverage','report'],cwd=ROOT,check=True)
-        subprocess.run([sys.executable,'-m','coverage','json','-o','build/coverage.json'],cwd=ROOT,check=True)
-        data=json.loads((ROOT/'build/coverage.json').read_text())['files']
+        subprocess.run([sys.executable,'-m','coverage','json','-o','build/reports/coverage.json'],cwd=ROOT,check=True)
+        data=json.loads((ROOT/'build/reports/coverage.json').read_text())['files']
         def summary(prefix):
             files=[v['summary'] for k,v in data.items() if prefix in k.replace('\\','/')]
             covered=sum(s['covered_lines'] for s in files); total=sum(s['num_statements'] for s in files)
@@ -52,7 +52,7 @@ def main():
     else:
         from .compare import compare
         for program in ('hello','fib','arrays','control','shifts'):
-            compare(ROOT/'bench'/f'{program}.c',output=ROOT/'build'/'compare'/program)
+            compare(ROOT/'examples/compiler'/f'{program}.c',output=ROOT/'build'/'compare'/program)
         print('GCC execution comparison: ok')
     if args.cpu21:
         from .verify_cpu21 import verify,DEFAULT_FPGA

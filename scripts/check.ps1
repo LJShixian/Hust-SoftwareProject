@@ -1,8 +1,9 @@
 param([switch]$Full)
 $ErrorActionPreference = 'Stop'
-Push-Location $PSScriptRoot
+$myccRoot = Split-Path -Parent $PSScriptRoot
+Push-Location $myccRoot
 try {
-    $myccPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+    $myccPython = Join-Path $myccRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $myccPython)) { $myccPython = 'python' }
     if ($Full) { & $myccPython -m tools.check --full }
     else { & $myccPython -m tools.check }

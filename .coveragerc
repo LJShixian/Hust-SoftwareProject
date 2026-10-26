@@ -1,4 +1,5 @@
 [run]
+data_file = build/reports/.coverage
 source = mycc
 branch = True
 omit = mycc/__main__.py

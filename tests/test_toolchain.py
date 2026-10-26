@@ -26,7 +26,7 @@ def assembled_matrix(tmp_path_factory):
         p=core.load_profile(name,enable,disable)
         # Linux executable provides an independent optional execution path.
         out=root/f'p{i}'/program
-        elf=build(ROOT/'bench'/f'{program}.c',p,True,out)
+        elf=build(ROOT/'examples/compiler'/f'{program}.c',p,True,out)
         return i,program,p,elf
     with ThreadPoolExecutor(max_workers=4) as pool: return list(pool.map(worker,jobs))
 
@@ -49,7 +49,7 @@ def test_bare_metal_no_lui_and_no_vshift(tmp_path):
     try: tool('as')
     except RuntimeError: pytest.skip('RISC-V GNU toolchain unavailable')
     p=core.load_profile('PF-01',disable=['lui','vshift'])
-    elf=build(ROOT/'bench/arrays.c',p,False,tmp_path/'arrays',target='cpu21')
+    elf=build(ROOT/'examples/compiler/arrays.c',p,False,tmp_path/'arrays',target='cpu21')
     assert not lint(elf,p,target='cpu21')
 
 

@@ -1,4 +1,4 @@
-> **Historical revision**: defaults and product scope are superseded by [SDD-MYCC-001 v1.3 编译器范围收敛修订.md](SDD-MYCC-001%20v1.3%20编译器范围收敛修订.md). Hardware protocol and previous evidence remain preserved.
+> **Historical revision**: defaults and product scope are superseded by [SDD-MYCC-001 v1.3 编译器范围收敛修订.md](SDD-v1.3-scope.md). Hardware protocol and previous evidence remain preserved.
 
 # SDD-MYCC-001 v1.2 — CPU21 板卡适配修订
 

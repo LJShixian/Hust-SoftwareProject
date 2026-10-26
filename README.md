@@ -1,115 +1,255 @@
-# mycc 0.3.0 — 可配置指令集的 C 子集编译器
+# mycc — 可配置指令集的 C 子集编译器
 
-输入 **受限 C 程序 + 可用 ISA**，输出 **GNU RISC-V 汇编 + 源码诊断 + 指令选择说明**。默认 generic/PF-01。编译核心与 CLI 仅需 Python 3.11+，图形工作台使用 PySide6。
+mycc 0.3.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，生成 **GNU RISC-V 汇编、源码诊断和指令选择说明**。可在命令行使用，也可在 PySide6 工作台中编辑、编译和查看结果。
 
-[范围说明](docs/SCOPE.md) 是当前产品边界，先于程序调整提交为 `989e49d`。CPU21 固件适配和原有验证证据保留在独立适配层，主界面围绕编辑、编译和汇编查看组织。
+当前产品边界见 [范围说明](docs/guides/scope.md)。常用入口是 `python -m mycc`；CPU21 固件构建是可选集成，需要显式选择。原 FPGA 扫雷项目继续由原有 GCC 流程构建。
 
-[工作台预览](docs/workbench.png) · [本次范围收敛记录](docs/SCOPE_IMPLEMENTATION.md)
+导航：[快速使用](#快速使用) · [目录结构](#目录结构) · [运行流程](#运行流程) · [实现方式](#实现方式) · [ISA 与语言范围](#isa-与语言范围) · [外部运行与验证](#外部运行与验证) · [文档索引](docs/README.md)
 
-## 开始使用
+## 快速使用
+
+以下命令在仓库根目录执行。CLI 只需 Python 3.11+ 和标准库，无需安装 GUI、GNU 工具链、QEMU 或 Vivado。
 
 ```powershell
-# 当前目录已准备 GUI 和测试虚拟环境
-.\launch.cmd
+python -m mycc --doctor
 
-# 编译器主流程，无需 GNU 工具链、板卡、QEMU 或 Vivado
-python -m mycc bench/compiler_demo.c -o demo.s
+# CLI 输出父目录须先存在；生成物统一放在 build/
+New-Item -ItemType Directory -Force build/demo | Out-Null
+python -m mycc examples/compiler/compiler_demo.c -o build/demo/default.s
 
-# 同一源码启用硬件乘法，观察不同汇编和原因
-python -m mycc bench/compiler_demo.c --enable mul -o demo-mul.s --dump-lowering-report
+# 同一程序启用乘法指令，查看汇编变化及原因
+python -m mycc examples/compiler/compiler_demo.c --enable mul -o build/demo/mul.s --dump-lowering-report
 
-# 查看最终允许的指令
+# 无需源文件也能查看最终 ISA
 python -m mycc --dump-isa
 python -m mycc --dump-isa-whitelist
 ```
 
-全新环境可只使用标准库 CLI；GUI 与开发测试安装：
+`compiler_demo.c` 定义 `square`，循环累加 0² 至 5²，再调用输出函数。预期运行输出为 `55` 加换行；上述命令只生成汇编，并未运行程序。
+
+需要 GUI 和测试环境时：
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt pytest coverage
-```
-
-同时提供 PowerShell 与 Bash 入口；若 PowerShell 禁止执行脚本，使用 `.cmd` 即可，无需修改系统策略。
-
-## 工作台与编译结果
-
-主界面支持源码编辑、ISA 预设/组选择、F5 编译、取消、诊断双击定位和汇编导出（Ctrl+Shift+E）。标签页包含汇编、Token、AST、IR 和 Lowering 报告。失败保留上一次成功汇编并标记，编辑源码或 ISA 后标记过期。
-
-全部合法 ISA 配置可选。`cpu21` 仅为一份硬件参考指令集合，选择它不会启用板卡启动、MMIO 或栈故障策略；启用字节加载也不会自动开放 char。
-
-GUI 不启动外部构建/仿真进程，不显示板卡地址。帮助菜单提供外部命令说明。设置位于 `~/.config/mycc/gui.json`，格式为 schema_version=2；旧 board 配置保存在 legacy 字段中，不应用到普通编译。
-
-### 汇编与运行时的边界
-
-`.s` 是编译输出，不是独立可执行文件。函数 ABI、栈帧和表达式翻译由 mycc 负责；起始栈地址、最终内存布局、启动入口与外设由外部环境提供。
-
-默认 PF-01 不含硬件乘除法，生成的 `__mulsi3/__divsi3/__modsi3` 等调用需链接 [runtime/runtime.s](runtime/runtime.s)。printint/printhex 的通用实现位于 `runtime/io.c`，putchar 和 exit 由外部运行时提供。只想观察编译结果时不需要链接它们。
-
-输出使用 `.section`、`.type`、`%hi/%lo` 等 GNU 语法。**当前不宣称 RARS 兼容**；RARS 后端暂缓，第一阶段接已有 GNU 工具链。原完整扫雷继续由原项目 GCC 构建。
-
-## ISA 与语言
-
-`--profile` 选择预设；`--isa-file` 读取 JSON；`--enable/--disable` 接受指令或组、逗号列表和重复参数，disable 优先。兼容 `--no-lui`、`--no-vshift`。
-
-| 预设 | 指令数 | 用途 |
-|---|---:|---|
-| PF-01 base | 26 | 默认 |
-| PF-02 base-nolui | 25 | 无 lui 回退 |
-| PF-03 base-novshift | 23 | 无寄存器移位回退 |
-| PF-04 full-i | 32 | 便利指令组合 |
-| PF-05 i+m | 29 | 硬件有符号乘除法组合 |
-| PF-06 byteload | 30 | 能力描述，不开放 char |
-| PF-07 all | 39 | 本编译器指令范围上限 |
-| cpu21 | 32 | CPU21 的编译器相关参考 ISA |
-
-支持 int、单层 int*、一维数组、最多 8 参数、函数递归、全局/局部变量、if/else、while/for、break/continue、return、算术/位运算/比较/短路、自增减、赋值、下标、取地址/解引用和 sizeof。
-
-暂不支持预处理、字符串、char、unsigned/volatile、结构体、类型转换、函数指针、内联汇编、ISR、switch、?: 和 do-while，遇到时明确诊断。ISA 配置不改变这套语言范围。
-
-可使用 `--dump-tokens/--dump-ast/--dump-ir/--dump-lowering-report/--stats` 观察结果。
-
-## 开发验证
-
-```powershell
+.\launch.cmd
 .\check.cmd
 ```
 
-检查包含核心演示、诊断/输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵，并断言原覆盖率门槛。缺少外部环境时报告跳过，不能据此声称执行通过。
+根目录 `.cmd` 自动优先使用本仓库 `.venv`。其余命令中的 `python` 指当前终端解释器；未激活环境时可替换为 `.\.venv\Scripts\python`。PowerShell 入口为 `scripts/launch.ps1`、`scripts/check.ps1`。若系统限制执行 `.ps1`，直接使用 `.cmd`，无需修改系统策略。
 
-三个核心演示位于 `bench/compiler_demo.c` 和 `tests/test_scope.py`：生成汇编、切换 mul 比较实现、制造错误观察位置和建议。
-
-## 可选外部适配
-
-这些命令需在终端显式执行，不是普通编译的依赖。
-
-```powershell
-# CPU21 固件与只读原始 RTL 验证
-python -m tools.build bench/compiler_demo.c --target cpu21 -o build/cpu21-demo
-.\check.cmd --cpu21 --fpga-root D:\Xilinx\Project\risc-v
-
-# QEMU / GCC 验证，需要另行准备外部工具
-python -m tools.build bench/compiler_demo.c --qemu
-qemu-riscv32 build/compiler_demo.elf
-python -m tools.compare bench/compiler_demo.c
-```
-
-[CPU21 适配](adapters/cpu21/README.md) 保留 Harvard 内存、启动、VGA、栈保护、MMIO 校验及 ROM 导出；数据在 `adapters/cpu21/board.json`、`isa.json`，代码资产也集中在该目录。兼容 `mycc --target cpu21`，由 CLI 显式加载适配并注入通用编译策略。不能把普通 generic 汇编直接当作 CPU21 完整固件。
-
-[generic 裸机样例](adapters/generic/README.md) 的地址只是集成示例，默认构建不代表支持任意板卡。[QEMU 适配](adapters/qemu/README.md) 使用独立启动/链接资产。本机缺少 qemu-riscv32，QEMU/GCC 执行对照仍未验证。
-
-工具不回写 `risc-v` 工程，不下载 FPGA。CPU21 的历史仿真结果与 0.3.0 回归分别记录；尚无物理上板证据。
-
-## 目录与版本记录
+## 目录结构
 
 ```text
-mycc/core/       七模块编译内核
-mycc/cli.py      命令行文件与参数边界
-mycc/gui/        薄编译工作台
-runtime/        通用软件算术/内存和 I/O 格式函数
-adapters/       CPU21、generic 裸机、QEMU 的可选外部环境
-tools/          构建与开发验证工具
-bench/, tests/  示例及测试
+SoftwareEngineering/
+├─ README.md                       使用、流程、实现和边界
+├─ pyproject.toml                  包元数据、可选依赖及 pytest 配置
+├─ requirements.txt / THIRD_PARTY.md  GUI 依赖 / 第三方说明
+├─ launch.cmd / check.cmd          Windows GUI / 检查快捷入口
+├─ mycc/                           编译器软件
+│  ├─ __main__.py / cli.py         模块入口、参数解析和文件读写
+│  ├─ core/                       标准库实现的七模块编译内核
+│  │  ├─ types.py                 类型、AST、诊断、选项及结果结构
+│  │  ├─ lexer.py                 C 文本 → Token
+│  │  ├─ parser.py                Token → AST
+│  │  ├─ sema.py                  作用域、符号和类型检查
+│  │  ├─ isa.py                   ISA 预设、能力校验及指令回退
+│  │  ├─ codegen.py               栈帧、表达式和控制流汇编生成
+│  │  └─ driver.py                调度阶段并收集结果
+│  └─ gui/                        PySide6 编译工作台
+│     ├─ app.py                   启动与依赖检查
+│     ├─ workbench.py             状态、请求、设置和导出逻辑
+│     └─ views.py                 窗口、后台编译与结果展示
+├─ runtime/                        与板卡无关的运行时
+│  ├─ runtime.s                   软件算术与内存辅助函数
+│  └─ io.c                        printint / printhex 格式化输出
+├─ adapters/                       可选外部运行环境
+│  ├─ cpu21/                      策略、ISA/MMIO、启动、VGA、链接、ROM 导出
+│  ├─ generic/                    通用裸机样例及占位 MMIO 配置
+│  └─ qemu/                       Linux-user QEMU 启动和链接资产
+├─ examples/
+│  ├─ compiler/                   演示、函数、数组、控制流、指针和运算示例
+│  └─ cpu21/                      VGA、滚屏、栈保护及板卡自检示例
+├─ configs/isa/
+│  ├─ presets/                    PF-01 至 PF-07 的 JSON 参考配置
+│  └─ examples/board_v2.json       自定义 ISA 文件示例
+├─ tools/                          python -m tools.* 开发工具
+│  ├─ build.py                    GNU 汇编/链接及固件导出
+│  ├─ check.py                    测试、覆盖率与可选外部验证
+│  ├─ verify_cpu21.py             只读加载原始 RTL，运行固件回归
+│  ├─ compare.py                  QEMU 中对照 mycc 与 GCC 行为
+│  ├─ check_architecture.py       模块依赖边界检查
+│  ├─ check_isa_consistency.py     编译配置与硬件能力对比
+│  └─ lint.py / normalize_mnemonic.py  指令检查及助记符规范化
+├─ scripts/                        PowerShell / Bash 辅助入口
+├─ tests/                          编译、CLI、GUI、工具链及适配测试
+│  └─ rtl/cpu21_program_tb.v       本软件维护的 RTL 验证 testbench
+├─ docs/
+│  ├─ README.md                   文档阅读顺序与版本索引
+│  ├─ guides/                     当前范围及目录迁移说明
+│  ├─ specs/requirements/         SRS 原始需求与历次修订
+│  ├─ specs/design/               SDD 原始设计与历次修订
+│  ├─ history/                    创意、决策、实施和兼容审计记录
+│  ├─ verification/               纳入 Git 的历史结果与源码哈希
+│  └─ images/workbench.png        工作台截图
+├─ .github/workflows/              CI 检查
+└─ build/                          自动生成，不纳入 Git
+   ├─ demo/                       本说明中的编译输出
+   ├─ reports/                    .coverage 和 coverage.json
+   ├─ .pytest_cache/              pytest 缓存
+   ├─ cpu21-verification/          可选 RTL 回归日志、ROM 和结果
+   └─ archive/                    整理前的本地生成物归档
 ```
 
-范围收敛记录为 CR-SCOPE-001，需求修订 SRS v1.4、设计修订 SDD v1.3。此前 0.2.0 / CR-CPU21-001 的实现、文档和验收作为历史保留，当前默认行为以范围说明和最新修订为准。
+`.venv/`、`__pycache__/`、`build/` 属于本地环境或生成内容。源码、配置和文档由 Git 管理；`docs/verification/` 保存特定版本的验收证据，新运行的临时结果写入 `build/`。
+
+ISA 文件描述“允许生成什么指令”，MMIO 文件描述“外设在哪里”。因此自定义 ISA 在 `configs/isa/`，地址配置在适配目录，二者不能混用。内置预设的实现源为 `mycc/core/isa.py`，`configs/isa/presets/` 是对应的 JSON 参考文件。
+
+## 运行流程
+
+### 从 C 到汇编：软件主流程
+
+```text
+CLI 参数 / GUI 编辑内容 + ISA 配置
+                     │
+                     ▼
+            校验并形成最终可用指令集合
+                     │
+C 源码 → lexer → Token → parser → AST → sema → 已检查的 AST
+                                                    │
+                                                    ▼
+                                       codegen 按 ISA 选择实现
+                                                    │
+                                                    ▼
+                          汇编 + 诊断 + Token/AST/IR/Lowering 报告
+                                                    │
+                                  CLI 写文件 / GUI 展示与导出
+```
+
+1. **读取输入。** CLI 解析参数、读取 UTF-8 源文件和可选 JSON；GUI 从编辑器与 ISA 面板构建请求。默认 generic 环境和 PF-01。
+2. **ISA 校验。** 合并预设或自定义集合及 enable/disable，检查必要能力。非法指令名返回配置诊断。
+3. **词法与语法。** 识别关键字、标识符、常量和运算符并记录行列，建立函数、声明、语句与表达式的 AST。
+4. **语义检查。** 建立符号及作用域，检查变量声明、参数、返回值和指针/整数操作等。
+5. **生成汇编。** 分配栈帧、生成调用和分支，按 ISA 选择原生指令或软件回退。
+6. **交付结果。** CLI 成功后原子替换 `.s`，失败不覆盖旧文件。GUI 保留上一次成功结果并标记失败或过期状态。
+
+内核接收 `SourceFile`、`ISAProfile`、`CompileOptions`，返回 `CompileResult`；不读写文件、不创建窗口、不调用外部进程。文件操作属于 CLI/GUI，外部工具调用属于 `tools/`。
+
+### 从汇编到运行：可选外部流程
+
+```text
+mycc .s + 软件辅助函数 + I/O + 目标启动代码
+                         │
+                         ▼
+                  GNU as → .o → GNU ld → .elf
+                                           │
+                       ┌───────────────────┴─────────────────┐
+                       ▼                                     ▼
+                QEMU 执行与对照                    BIN / HEX / VH 等 ROM 输出
+                                                             │
+                                                             ▼
+                                                   CPU21 RTL 仿真或人工集成
+```
+
+编译器负责表达式、控制流、调用约定和栈帧。真正运行还需 `_start`、初始栈、数据初始化、内存布局与外设函数。例如 `printint` 最终调用 `putchar`，其输出方式由环境决定。
+
+CPU21 需要专门适配，因为它采用 Harvard 结构，ROM/RAM、VGA 协议和退出方式都有具体约束。仅选择相同 ISA 无法自动解决这些条件。`--profile cpu21` 只选择指令集合，`--target cpu21` 才加载适配策略。
+
+输出为 GNU 汇编，使用 `.section`、`.type`、`%hi/%lo` 等语法，**不保证可直接交给原来的 RARS JAR**。RARS 兼容后端已在范围说明中暂缓。
+
+## 实现方式
+
+| 部分 | 当前实现 |
+|---|---|
+| 词法分析 | Python 正则扫描，跳过注释和空白，Token 保存源码位置 |
+| 语法分析 | 声明/语句用递归下降，表达式按优先级解析，形成 AST |
+| 语义分析 | 函数与块作用域、符号和类型检查、调用及控制流约束 |
+| 数据与调用 | 32 位 int、单层 int 指针、一维数组，ILP32 数据/调用约定 |
+| 代码生成 | 遍历 AST 直接输出汇编；栈保存局部值及中间结果，s0 帧指针、16 字节栈对齐、a0–a7 参数寄存器 |
+| ISA 回退 | 根据能力选择硬件指令、等价指令序列或运行时辅助调用 |
+| 结果记录 | Token、AST、IR、Lowering、阶段耗时和诊断放入结果对象 |
+
+当前是便于检查的直接代码生成器，没有独立优化器或复杂寄存器分配器。**IR 页面是代码生成过程中的结构化记录**，不是经优化后再交给独立后端的完整中间语言流水线。
+
+例如 `int square(int n) { return n * n; }`：默认 PF-01 不含 `mul`，编译器调用 `__mulsi3`；加 `--enable mul` 后可生成 `mul`。前端仍解析同一个程序，变化发生在指令选择阶段，Lowering 报告说明原因。除法、取余、异或、移位等同样依据能力选实现；基本能力不足则拒绝配置。
+
+`runtime/runtime.s` 提供软件算术和内存辅助函数，`runtime/io.c` 提供 `printint/printhex`，外部环境提供 `putchar/exit`。观察 `.s` 无需链接，生成可执行程序时须补齐实际引用的符号。
+
+CPU21 通过通用 `CodegenPolicy` 和外部函数签名注入 BSS 初始化、低地址约束及栈保护。固定 MMIO、容量、显存和故障协议留在适配目录，核心不加载板卡文件。
+
+### GUI 工作台
+
+GUI 支持源码打开/保存、ISA 预设与组选择、F5 编译、取消、诊断双击定位和 Ctrl+Shift+E 导出。结果页有汇编、Token、AST、IR 和 Lowering。后台线程编译，主线程更新界面；源码或 ISA 修改后标记已有结果过期。
+
+外部构建/仿真通过帮助中的终端命令执行。GUI 设置在 `~/.config/mycc/gui.json`，格式 `schema_version=2`；旧板卡设置保留于 `legacy`。见 [工作台截图](docs/images/workbench.png)。
+
+## ISA 与语言范围
+
+`--profile` 选择内置预设，`--isa-file` 读取 JSON；`--enable/--disable` 可重复或用逗号分隔指令/组，disable 优先。兼容 `--no-lui`、`--no-vshift`。
+
+| 预设 | 指令数 | 用途 |
+|---|---:|---|
+| PF-01 / base | 26 | 默认基础集合 |
+| PF-02 / base-nolui | 25 | 无 lui 回退 |
+| PF-03 / base-novshift | 23 | 无寄存器移位回退 |
+| PF-04 / full-i | 32 | 便利指令组合 |
+| PF-05 / i+m | 29 | 硬件有符号乘除法 |
+| PF-06 / byteload | 30 | 字节加载能力，不开放 char 类型 |
+| PF-07 / all | 39 | 本编译器指令范围上限 |
+| cpu21 | 32 | CPU21 编译器相关参考集合 |
+
+常用组：`mul`、`divrem`、`m`、`xor`、`cmpbr`、`byteload`、`auipc`、`lui`、`vshift`。
+
+```powershell
+python -m mycc examples/compiler/muldiv.c --profile PF-01 --enable m -o build/demo/muldiv.s
+python -m mycc examples/compiler/shifts.c --disable vshift -o build/demo/shifts.s --dump-lowering-report
+python -m mycc examples/compiler/arrays.c --isa-file configs/isa/examples/board_v2.json -o build/demo/arrays.s
+```
+
+支持：int、单层 int*、一维数组、全局/局部变量、最多 8 参数、函数递归、if/else、while/for、break/continue、return、算术/位运算/比较/短路、自增减、赋值、下标、取地址/解引用和 sizeof。支持 `putchar('\n')` 形式的字符常量，但不支持 char 类型。
+
+暂不支持：预处理、字符串、char、unsigned/volatile、结构体、类型转换、函数指针、内联汇编、ISR、switch、?: 和 do-while。启用更多 ISA 不会扩大 C 语言范围。
+
+观察参数还有 `--dump-tokens`、`--dump-ast`、`--dump-ir`、`--dump-lowering-report`、`--stats`。源码诊断包含位置、阶段、错误码，并可附修复建议。
+
+CLI 退出码：`0` 成功，`1` 编译失败，`2` 内部错误，`64` 参数/ISA 配置错误，`65` 源码读取/编码错误，`70` 输出写入失败，`130` 用户中断。
+
+## 外部运行与验证
+
+| 环境 | 所需工具 | 提供内容和边界 |
+|---|---|---|
+| [CPU21](adapters/cpu21/README.md) | RISC-V GNU 工具；RTL 回归另需 Vivado xvlog/xelab/xsim 和原 RTL | Harvard 启动、VGA、栈保护、MMIO 校验、ROM 导出；尚无物理上板证据 |
+| [generic 裸机](adapters/generic/README.md) | RISC-V GNU 工具 | 统一可读代码/数据空间、占位外设的集成样例，使用前须核对硬件 |
+| [QEMU](adapters/qemu/README.md) | RISC-V GNU 工具、qemu-riscv32；对照另需 GCC | Linux-user 启动和系统调用，不表示 FPGA 支持这些调用 |
+
+```powershell
+# CPU21 完整固件：编译时选择地址配置
+python -m tools.build examples/compiler/compiler_demo.c --target cpu21 --board-file adapters/cpu21/board.json -o build/cpu21-demo
+
+# QEMU（需准备对应工具）
+python -m tools.build examples/compiler/compiler_demo.c --qemu
+qemu-riscv32 build/compiler_demo.elf
+python -m tools.compare examples/compiler/compiler_demo.c
+
+# 常规检查、可选 RTL 回归和严格检查
+.\check.cmd
+.\check.cmd --cpu21 --fpga-root D:\Xilinx\Project\risc-v
+.\check.cmd --full
+
+# 对比编译器相关指令集合
+python -m tools.check_isa_consistency adapters/cpu21/hw_caps.json --profile cpu21
+```
+
+CPU21 输出 `.s`、中间 `.o`、`.elf`、`.bin`、`.hex`、`.vh`、Logisim 镜像和 manifest。JSON 地址必须符合硬件实际译码；软件可配置不代表硬件地址随之改变。CPU21 无 UART，输出走 VGA，退出状态写 LED/SEG。
+
+本次整理后常规检查为 **115 passed、1 skipped**，覆盖率门槛通过。检查包括错误恢复、输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵。本机缺少 `qemu-riscv32`，执行/GCC 对照仍未验证；`--full` 将缺工具作为失败。
+
+CPU21 回归检查退出状态、VGA 600 个打包显存字、控制寄存器与栈故障行为，并对比外部工程前后文件哈希。本次整理后 **18 项回归全部通过，外部 81 个文件哈希一致**，见 [本次验证记录](docs/verification/layout-results-2026-10-26.json)。此前 [0.3.0 范围验收](docs/verification/scope-results-0.3.0-2026-10-26.json) 保留；新运行输出写 `build/cpu21-verification/`。
+
+工具不回写 `D:\Xilinx\Project\risc-v`，不生成或下载 bitstream。仿真与物理上板属于不同验证层次。
+
+## 文档和维护入口
+
+完整索引见 [docs/README.md](docs/README.md)。现行需求按 SRS v1.2 通用基线及 v1.4 修订阅读，设计按 SDD v1.1 基线及 v1.3 修订阅读。CPU21 修订继续约束显式适配，历史记录和验收证据保留。
+
+本次整理只改变文件位置、引用和说明。旧路径对应及生成物归档见 [目录整理记录](docs/guides/file-layout.md)。维护时：编译改 `mycc/core/`，界面改 `mycc/gui/`，运行环境改 `adapters/`，构建验证改 `tools/`，示例放 `examples/`，规范与记录放 `docs/`。修改内置 ISA 时同时核对 JSON 参考文件和测试。

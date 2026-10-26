@@ -27,7 +27,7 @@ def test_custom_mmio_values_in_linked_elf(tmp_path):
     try: tool('as')
     except RuntimeError: pytest.skip('RISC-V toolchain missing')
     values={'uart_tx':0x30000000,'vga_base':0x30001000,'exit_status':0x30000008}
-    elf=build(ROOT/'bench/hello.c',core.load_profile(),False,tmp_path/'board',values,target='generic')
+    elf=build(ROOT/'examples/compiler/hello.c',core.load_profile(),False,tmp_path/'board',values,target='generic')
     symbols=subprocess.check_output([tool('nm'),str(elf)],text=True)
     assert '30000000 A __uart_tx' in symbols
     assert '30001000 A __vga_base' in symbols
@@ -42,7 +42,7 @@ def test_cli_board_file_and_override(tmp_path):
     config=tmp_path/'board.json'
     config.write_text(json.dumps(dict(uart_tx='0x30000000',vga_base='0x30001000',exit_status='0x30000008')))
     out=tmp_path/'firmware'
-    assert main([str(ROOT/'bench/hello.c'),'--target','generic','-o',str(out),'--board-file',str(config),'--uart-tx','0x40000000'])==0
+    assert main([str(ROOT/'examples/compiler/hello.c'),'--target','generic','-o',str(out),'--board-file',str(config),'--uart-tx','0x40000000'])==0
     symbols=subprocess.check_output([tool('nm'),str(out.with_suffix('.elf'))],text=True)
     assert '40000000 A __uart_tx' in symbols
-    assert main([str(ROOT/'bench/hello.c'),'--uart-tx','0x3'])==1
+    assert main([str(ROOT/'examples/compiler/hello.c'),'--uart-tx','0x3'])==1

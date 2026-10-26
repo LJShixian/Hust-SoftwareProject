@@ -21,7 +21,7 @@ def test_default_compilation_needs_no_board_adapter_or_toolchain(tmp_path):
 
 
 def test_sc_core_01_demo_generates_real_gnu_object(tmp_path):
-    source=core.SourceFile((ROOT/'bench/compiler_demo.c').read_text(),'compiler_demo.c')
+    source=core.SourceFile((ROOT/'examples/compiler/compiler_demo.c').read_text(),'compiler_demo.c')
     result=core.compile(source)
     assert result.success and 'jal ra,__mulsi3' in result.asm
     try: assembler=tool('as')

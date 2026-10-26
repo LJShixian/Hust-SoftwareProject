@@ -64,7 +64,7 @@ def test_word_rom_export(tmp_path):
 def test_build_cpu21_uses_production_startup_and_manifest(tmp_path):
     try: tool('as')
     except RuntimeError: pytest.skip('GNU RISC-V tools absent')
-    elf=build(ROOT/'bench/cpu21_selftest.c',output=tmp_path/'selftest',target='cpu21')
+    elf=build(ROOT/'examples/cpu21/cpu21_selftest.c',output=tmp_path/'selftest',target='cpu21')
     symbols=subprocess.check_output([tool('nm'),str(elf)],text=True)
     assert any(line.split()[0]=='00001000' and line.split()[-1]=='__stack_top' for line in symbols.splitlines())
     assert '__mycc_init_globals' in symbols
@@ -103,7 +103,7 @@ def test_cpu21_board_file_roundtrip(tmp_path):
     except RuntimeError: pytest.skip('GNU RISC-V tools absent')
     config=tmp_path/'board.json'; config.write_text(json.dumps(CPU21Board().as_dict()))
     out=tmp_path/'board'
-    assert main([str(ROOT/'bench/hello.c'),'--target','cpu21','--board-file',str(config),'-o',str(out)])==0
+    assert main([str(ROOT/'examples/compiler/hello.c'),'--target','cpu21','--board-file',str(config),'-o',str(out)])==0
     assert out.with_suffix('.hex').exists()
 
 
@@ -114,7 +114,7 @@ def test_rtl_verifier_refuses_outputs_inside_hardware():
 
 
 def test_cpu21_reference_assets_match_target():
-    for path in (ASSETS/'isa.json',ROOT/'isa/hw_caps.json'):
+    for path in (ASSETS/'isa.json',ROOT/'adapters/cpu21/hw_caps.json'):
         data=json.loads(path.read_text(encoding='utf-8'))
         assert core.load_profile(data=data).instructions==CPU21_INSTRUCTIONS
     board=json.loads((ASSETS/'board.json').read_text())

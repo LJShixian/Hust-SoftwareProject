@@ -6,10 +6,10 @@
 
 ```powershell
 # 适配后的汇编（包含 BSS 初始化入口、板卡栈保护等）
-python -m mycc bench/arrays.c --target cpu21 -o build/arrays-cpu21.s
+python -m mycc examples/compiler/arrays.c --target cpu21 -o build/arrays-cpu21.s
 
 # 完整固件，全部输出留在软件目录
-python -m tools.build bench/arrays.c --target cpu21 --board-file adapters/cpu21/board.json -o build/arrays
+python -m tools.build examples/compiler/arrays.c --target cpu21 --board-file adapters/cpu21/board.json -o build/arrays
 
 # 可选：只读使用外部 RTL 验证
 python -m tools.verify_cpu21 --root D:\Xilinx\Project\risc-v
