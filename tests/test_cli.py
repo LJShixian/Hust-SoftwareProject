@@ -7,9 +7,9 @@ def test_cli_direct_success_and_dumps(tmp_path,capsys):
     src=tmp_path/'good.c'; dest=tmp_path/'good.s'; src.write_text('int main(){return 3*7;}')
     assert cli.main([str(src),'-o',str(dest),'--dump-tokens','--dump-ast','--dump-ir','--dump-lowering-report','--stats'])==0
     out=capsys.readouterr(); assert 'MUL' in out.out and 'lex\t' in out.err
-    assert dest.read_text()==core.compile(core.SourceFile(src.read_text(),str(src)),core.load_profile('cpu21'),options=core.CompileOptions(target='cpu21')).asm
+    assert dest.read_text()==core.compile(core.SourceFile(src.read_text(),str(src))).asm
     assert cli.main(['--dump-isa','--dump-isa-whitelist','--no-lui','--no-vshift'])==0
-    assert 'cpu21' in capsys.readouterr().out
+    assert 'base' in capsys.readouterr().out
     assert cli.main(['--doctor'])==0
 
 

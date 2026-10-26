@@ -20,19 +20,8 @@ PRESETS = {
     'i+m': BASE|GROUPS['m'], 'byteload': BASE|GROUPS['byteload'], 'all': ALL,
 }
 ALIASES = {f'PF-{i:02}': name for i,name in enumerate(PRESETS,1)}
-CPU21_INSTRUCTIONS = BASE | GROUPS['mul'] | GROUPS['xor'] | GROUPS['cmpbr']
-PRESETS['cpu21'] = CPU21_INSTRUCTIONS
-
-
-def check_target(profile,target):
-    """Reject capabilities absent from the selected physical target."""
-    if target not in ('generic','cpu21'):
-        raise ProfileError(f'unknown target {target!r}',64)
-    if target=='cpu21':
-        missing=profile.instructions-CPU21_INSTRUCTIONS
-        if missing:
-            raise ProfileError('CPU21 does not implement: '+', '.join(sorted(missing))+
-                               '; use --profile cpu21 or remove these instructions',64,'E-TARGET-ISA')
+# A reference instruction set is data only; selecting it does not select a board ABI.
+PRESETS['cpu21'] = BASE | GROUPS['mul'] | GROUPS['xor'] | GROUPS['cmpbr']
 
 
 @dataclass(frozen=True)

@@ -1,134 +1,115 @@
-# mycc 0.2.0 — CPU21 FPGA C 子集编译器
+# mycc 0.3.0 — 可配置指令集的 C 子集编译器
 
-默认适配 `D:/Xilinx/Project/risc-v` 中的 CPU21：32 KiB 指令 ROM、4 KiB 独立数据 RAM、40×30 VGA。编译内核和 CLI 仅依赖 Python 3.11+ 标准库；GUI 使用 PySide6。
+输入 **受限 C 程序 + 可用 ISA**，输出 **GNU RISC-V 汇编 + 源码诊断 + 指令选择说明**。默认 generic/PF-01。编译核心与 CLI 仅需 Python 3.11+，图形工作台使用 PySide6。
 
-**正式构建器输出的固件已通过原始 CPU RTL 的 XSim 执行验证，包括返回状态和全部 600 个显存字比对。尚未进行物理下载、实际显示器或引脚验证。** 工具不会修改 FPGA 项目。
+[范围说明](docs/SCOPE.md) 是当前产品边界，先于程序调整提交为 `989e49d`。CPU21 固件适配和原有验证证据保留在独立适配层，主界面围绕编辑、编译和汇编查看组织。
 
-[工作台预览](docs/workbench.png) · [原始不兼容问题与历史失败证据](docs/FPGA_COMPATIBILITY.md) · [本次适配与验证记录](docs/CPU21_ADAPTATION.md)
+[工作台预览](docs/workbench.png) · [本次范围收敛记录](docs/SCOPE_IMPLEMENTATION.md)
 
-## 启动与构建
-
-当前目录已准备 `.venv`，可直接运行：
+## 开始使用
 
 ```powershell
+# 当前目录已准备 GUI 和测试虚拟环境
 .\launch.cmd
-.\check.cmd
 
-# 默认 CPU21 / cpu21 profile，生成汇编
-python -m mycc bench/hello.c -o hello.s
+# 编译器主流程，无需 GNU 工具链、板卡、QEMU 或 Vivado
+python -m mycc bench/compiler_demo.c -o demo.s
 
-# 生成完整 FPGA 固件
-python -m tools.build bench/hello.c -o build/hello
+# 同一源码启用硬件乘法，观察不同汇编和原因
+python -m mycc bench/compiler_demo.c --enable mul -o demo-mul.s --dump-lowering-report
 
-# 对照实际板卡配置（与默认配置一致）
-python -m tools.build bench/cpu21_selftest.c --board-file isa/cpu21.board.json -o build/selftest
+# 查看最终允许的指令
+python -m mycc --dump-isa
+python -m mycc --dump-isa-whitelist
 ```
 
-全新环境：
+全新环境可只使用标准库 CLI；GUI 与开发测试安装：
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt pytest coverage
 ```
 
-纯 CLI 无需安装第三方包。构建固件需要 RISC-V GNU binutils；`python -m mycc --doctor` 检查环境。也提供 `launch.ps1`、`check.ps1` 与 Linux `.sh` 入口。PowerShell 禁止执行脚本时使用 `.cmd`，无需修改系统策略。
+同时提供 PowerShell 与 Bash 入口；若 PowerShell 禁止执行脚本，使用 `.cmd` 即可，无需修改系统策略。
 
-## CPU21 目标的实际行为
+## 工作台与编译结果
 
-- 默认 `--target cpu21 --profile cpu21`，使用硬件支持的 32 条编译指令；乘法可走 mul，有符号除法/取余使用软件函数。启用 div/rem、auipc、字节加载等未实现能力会提前报错。
-- 全局变量位于从 0 开始的独立 RAM。启动先清 BSS，再执行生成的全局初始化指令，支持带初值的全局标量和数组；不从指令 ROM 读取数据。
-- 栈顶为 `0x1000`，16 字节对齐；BSS 超过 2 KiB 或 ROM 超过 32 KiB 拒绝链接。动态栈不足时，LED/七段输出 `0x5354414B`（STAK）后停止，避免静默破坏全局数据。
-- 启动关闭尚未接管的中断及鼠标中断源。本版本不接管原扫雷应用的 ISR，不提供断点调试器。
-- putchar/printint/printhex 输出到现有 VGA；CPU21 没有 UART。程序退出值同时写入 LED `0x1000` 与七段寄存器 `0x1004`，然后自旋。
+主界面支持源码编辑、ISA 预设/组选择、F5 编译、取消、诊断双击定位和汇编导出（Ctrl+Shift+E）。标签页包含汇编、Token、AST、IR 和 Lowering 报告。失败保留上一次成功汇编并标记，编辑源码或 ISA 后标记过期。
 
-### VGA 字形范围
+全部合法 ISA 配置可选。`cpu21` 仅为一份硬件参考指令集合，选择它不会启用板卡启动、MMIO 或栈故障策略；启用字节加载也不会自动开放 char。
 
-VGA 由硬件字形表决定：每格 2 字节，低字节是 6 位字形，高字节是 3 位颜色。控制台输出为白色，小写显示为大写；**0/O、9/Q 共用已有字形**，减号使用横线，其他缺失字形显示问号。整数运算与返回值不受这个显示限制影响。
+GUI 不启动外部构建/仿真进程，不显示板卡地址。帮助菜单提供外部命令说明。设置位于 `~/.config/mycc/gui.json`，格式为 schema_version=2；旧 board 配置保存在 legacy 字段中，不应用到普通编译。
 
-支持空格、换行、回车、4 列制表及 1200 格回绕；也可使用运行时函数：
+### 汇编与运行时的边界
 
-```c
-int main(void) {
-    vga_cell(0, 16, 7);   /* 第 0 格，字形 A，颜色 7 */
-    vga_cursor(1, 0);     /* 列、行；启用硬件光标 */
-    return 0;
-}
-```
+`.s` 是编译输出，不是独立可执行文件。函数 ABI、栈帧和表达式翻译由 mycc 负责；起始栈地址、最终内存布局、启动入口与外设由外部环境提供。
 
-### 地址配置
+默认 PF-01 不含硬件乘除法，生成的 `__mulsi3/__divsi3/__modsi3` 等调用需链接 [runtime/runtime.s](runtime/runtime.s)。printint/printhex 的通用实现位于 `runtime/io.c`，putchar 和 exit 由外部运行时提供。只想观察编译结果时不需要链接它们。
 
-工作台可配置 LED、七段数码管、VGA、显示控制/光标和鼠标中断控制地址；不再把不存在的 UART 或专用退出寄存器作为板卡配置。
+输出使用 `.section`、`.type`、`%hi/%lo` 等 GNU 语法。**当前不宣称 RARS 兼容**；RARS 后端暂缓，第一阶段接已有 GNU 工具链。原完整扫雷继续由原项目 GCC 构建。
 
-```powershell
-python -m tools.build bench/hello.c --board-file isa/cpu21.board.json
-python -m tools.build bench/hello.c --led 0x1000 --seg 0x1004 --vga-base 0x2000
-```
+## ISA 与语言
 
-地址必须与实际硬件一致。配置仅改变软件访问位置，不会增加硬件外设或改变 VGA 协议。校验包括 4 字节对齐、低地址范围和显存重叠。
+`--profile` 选择预设；`--isa-file` 读取 JSON；`--enable/--disable` 接受指令或组、逗号列表和重复参数，disable 优先。兼容 `--no-lui`、`--no-vshift`。
 
-## 产物与 ROM 集成
+| 预设 | 指令数 | 用途 |
+|---|---:|---|
+| PF-01 base | 26 | 默认 |
+| PF-02 base-nolui | 25 | 无 lui 回退 |
+| PF-03 base-novshift | 23 | 无寄存器移位回退 |
+| PF-04 full-i | 32 | 便利指令组合 |
+| PF-05 i+m | 29 | 硬件有符号乘除法组合 |
+| PF-06 byteload | 30 | 能力描述，不开放 char |
+| PF-07 all | 39 | 本编译器指令范围上限 |
+| cpu21 | 32 | CPU21 的编译器相关参考 ISA |
 
-`python -m tools.build ... -o build/hello` 输出：
+支持 int、单层 int*、一维数组、最多 8 参数、函数递归、全局/局部变量、if/else、while/for、break/continue、return、算术/位运算/比较/短路、自增减、赋值、下标、取地址/解引用和 sizeof。
 
-| 文件 | 用途 |
-|---|---|
-| `hello.elf` / `.bin` | 链接结果 / 原始小端二进制 |
-| `hello.hex` | **8192 行、每行一个 32 位字**，直接供 `reg [31:0] rom[]` 的 `$readmemh` 加载；NOP 补齐 |
-| `hello.vh` | `rom[i] = 32'h...;` 初始化语句，供手工审核后集成 |
-| `hello.logisim.hex` | Logisim v2 raw 的 32 位字格式 |
-| `hello.bytes.hex` | 单独保留的字节格式，不能与 32 位 ROM 格式混用 |
-| `hello.manifest.json` | target、profile 指纹、MMIO、字宽与二进制 SHA-256 |
+暂不支持预处理、字符串、char、unsigned/volatile、结构体、类型转换、函数指针、内联汇编、ISR、switch、?: 和 do-while，遇到时明确诊断。ISA 配置不改变这套语言范围。
 
-所有产物保存在本软件输出目录。工具不自动复制 `.vh/.hex` 到 `risc-v`，也不调用会回写硬件工程的构建脚本。生成 ROM 镜像不等于已生成 bitstream 或已下载开发板。
+可使用 `--dump-tokens/--dump-ast/--dump-ir/--dump-lowering-report/--stats` 观察结果。
 
-## 验证
+## 开发验证
 
 ```powershell
-# 单元、真实汇编/链接、54 组合 generic profile 矩阵、GUI offscreen、覆盖率
 .\check.cmd
+```
 
-# 再用本机 Vivado 和原始 CPU21 RTL 检查正式固件
+检查包含核心演示、诊断/输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵，并断言原覆盖率门槛。缺少外部环境时报告跳过，不能据此声称执行通过。
+
+三个核心演示位于 `bench/compiler_demo.c` 和 `tests/test_scope.py`：生成汇编、切换 mul 比较实现、制造错误观察位置和建议。
+
+## 可选外部适配
+
+这些命令需在终端显式执行，不是普通编译的依赖。
+
+```powershell
+# CPU21 固件与只读原始 RTL 验证
+python -m tools.build bench/compiler_demo.c --target cpu21 -o build/cpu21-demo
 .\check.cmd --cpu21 --fpga-root D:\Xilinx\Project\risc-v
 
-# 单独执行板卡仿真
-python -m tools.verify_cpu21 --root D:\Xilinx\Project\risc-v
-
-# 检查生成固件的指令
-python -m tools.lint build/hello.elf --target cpu21 --profile cpu21
+# QEMU / GCC 验证，需要另行准备外部工具
+python -m tools.build bench/compiler_demo.c --qemu
+qemu-riscv32 build/compiler_demo.elf
+python -m tools.compare bench/compiler_demo.c
 ```
 
-CPU21 验证使用正式启动代码，不替换成测试启动。RAM/显存先填脏数据，运行中注入未接管 IRQ，检查退出值、全显存字形/颜色、光标、屏幕回绕、全局初值、字节 memcpy/memset、除法边界和栈故障。前后逐文件哈希保证 FPGA 项目不变；验证输出目录若位于 FPGA 项目中会被拒绝。
+[CPU21 适配](adapters/cpu21/README.md) 保留 Harvard 内存、启动、VGA、栈保护、MMIO 校验及 ROM 导出；数据在 `adapters/cpu21/board.json`、`isa.json`，代码资产也集中在该目录。兼容 `mycc --target cpu21`，由 CLI 显式加载适配并注入通用编译策略。不能把普通 generic 汇编直接当作 CPU21 完整固件。
 
-最新结果与限制见 [适配记录](docs/CPU21_ADAPTATION.md)。QEMU/GCC 对照是另一条路径，本机缺少 `qemu-riscv32`；不影响已完成的 CPU21 RTL 执行证据，也不能据此声称 QEMU 对照通过。`check --full` 仍要求 QEMU/GCC。
+[generic 裸机样例](adapters/generic/README.md) 的地址只是集成示例，默认构建不代表支持任意板卡。[QEMU 适配](adapters/qemu/README.md) 使用独立启动/链接资产。本机缺少 qemu-riscv32，QEMU/GCC 执行对照仍未验证。
 
-## 通用目标与 ISA 观察
+工具不回写 `risc-v` 工程，不下载 FPGA。CPU21 的历史仿真结果与 0.3.0 回归分别记录；尚无物理上板证据。
 
-原有 RV32 profile 保留，超出 CPU21 硬件的能力需要显式选择通用目标：
+## 目录与版本记录
 
-```powershell
-python -m mycc bench/muldiv.c --target generic --profile PF-05 -o build/generic.s
-python -m mycc bench/muldiv.c --dump-lowering-report -o build/cpu21.s
-python -m mycc --dump-isa
-python -m mycc --dump-isa-whitelist --profile PF-01
-python -m mycc bench/arrays.c --disable lui,vshift -o build/fallback.s
+```text
+mycc/core/       七模块编译内核
+mycc/cli.py      命令行文件与参数边界
+mycc/gui/        薄编译工作台
+runtime/        通用软件算术/内存和 I/O 格式函数
+adapters/       CPU21、generic 裸机、QEMU 的可选外部环境
+tools/          构建与开发验证工具
+bench/, tests/  示例及测试
 ```
 
-`--enable/--disable` 支持指令或组、逗号列表、重复参数；disable 优先。支持 tokens/AST/IR/lowering dump 和 stats。PF-01..PF-07 的实际指令数依次为 26、25、23、32、29、30、39；原文计数修正保留在历史实现记录中。
-
-Linux/WSL 的 QEMU 流程：
-
-```bash
-python3 -m tools.build bench/fib.c --qemu
-qemu-riscv32 build/fib.elf
-python3 -m tools.compare bench/fib.c
-```
-
-工作台 F6 使用相同流程，从当前 C 源码重新按 generic 编译；FPGA 构建和 lint 使用 CPU21 目标。`isa/board.example.json` 是旧 generic UART 示例，只有 `--target generic` 才适用；实际 CPU21 配置为 `isa/cpu21.board.json`，ISA 参考为 `isa/cpu21.json`。
-
-## 语言与文档
-
-支持 int、单层 int*、一维数组、最多 8 参数、函数递归、全局/局部变量、if/else、while/for、break/continue、return、算术/位运算/比较/短路、自增减、赋值、下标、取地址/解引用和 sizeof。没有预处理、字符串、char、结构体、类型转换、函数指针、switch、?: 或 do-while；不支持构造会明确报错。
-
-需求和设计采用留痕修订：原 SRS v1.2 / SDD v1.1 正文保留；新增 **SRS v1.3 / SDD v1.2 CPU21 修订**，通过 CR-CPU21-001 记录原因、原/新条款、实现与测试追溯，冲突项以修订为准。
-
-目录：`mycc/core`（七模块）、`mycc/gui`、`runtime`、`linker`、`tools`、`bench`、`tests`、`需求分析&软件设计文档`。
+范围收敛记录为 CR-SCOPE-001，需求修订 SRS v1.4、设计修订 SDD v1.3。此前 0.2.0 / CR-CPU21-001 的实现、文档和验收作为历史保留，当前默认行为以范围说明和最新修订为准。

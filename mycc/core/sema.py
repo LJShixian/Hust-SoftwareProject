@@ -17,14 +17,14 @@ BUILTINS = {
     'putchar': (VOID, [INT]), 'printint': (VOID, [INT]), 'printhex': (VOID, [INT]),
     'exit': (VOID, [INT]), 'memcpy': (PTR, [PTR, PTR, INT]),
     'memset': (PTR, [PTR, INT, INT]),
-    'vga_cell': (VOID, [INT, INT, INT]), 'vga_cursor': (VOID, [INT, INT]),
 }
 
 
 class Analyzer:
-    def __init__(self, reporter):
+    def __init__(self, reporter, externals=None):
         self.reporter = reporter
-        self.scopes = [{name: Symbol(name, ret, True, args) for name,(ret,args) in BUILTINS.items()}]
+        self.builtins=BUILTINS | (externals or {})
+        self.scopes = [{name: Symbol(name, ret, True, args) for name,(ret,args) in self.builtins.items()}]
         self.loop = 0
         self.function = None
         self.locals = []
@@ -177,8 +177,8 @@ class Analyzer:
     def program(self, prog, require_main=True):
         defined=set()
         for n in prog.children:
-            if n.kind=='func' and n.value in BUILTINS and n.value not in defined:
-                ret,args=BUILTINS[n.value]
+            if n.kind=='func' and n.value in self.builtins and n.value not in defined:
+                ret,args=self.builtins[n.value]
                 if n.type!=ret or [p.type for p in n.children[:-1]]!=args:
                     self.error(n,'runtime function signature mismatch')
                 self.scopes[0].pop(n.value)
@@ -207,5 +207,5 @@ class Analyzer:
         return False
 
 
-def analyze(prog,reporter,require_main=True):
-    return Analyzer(reporter).program(prog,require_main)
+def analyze(prog,reporter,require_main=True,externals=None):
+    return Analyzer(reporter,externals).program(prog,require_main)

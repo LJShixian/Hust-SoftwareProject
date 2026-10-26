@@ -9,7 +9,7 @@ from .normalize_mnemonic import normalize
 
 
 def lint(elf,profile,qemu=False,target='generic'):
-    from mycc.core import check_target
+    from adapters import check_target
     check_target(profile,target)
     text=subprocess.check_output([tool('objdump'),'-d','-M','no-aliases',str(elf)],text=True,timeout=30)
     allowed=set(profile.instructions)

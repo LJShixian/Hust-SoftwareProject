@@ -2,7 +2,8 @@ import json
 import subprocess
 import pytest
 from mycc import core
-from mycc.gui.workbench import WorkbenchState,board_arguments,build_hardware_command
+from adapters.cpu21 import CPU21Board,board_arguments
+from adapters.generic.config import BoardAddresses
 from tools.build import build,tool,ROOT,main
 
 
@@ -13,15 +14,13 @@ from tools.build import build,tool,ROOT,main
     {'uart_tx':0x100000000,'vga_base':0,'exit_status':4},
 ])
 def test_bad_mmio_address(data):
-    with pytest.raises(ValueError): core.BoardAddresses.from_mapping(data)
+    with pytest.raises(ValueError): BoardAddresses.from_mapping(data)
 
 
 def test_mmio_command_and_config():
-    state=WorkbenchState(board={key:hex(value) for key,value in core.CPU21Board(led=0x1010).as_dict().items()})
-    args=board_arguments(state.board)
+    board={key:hex(value) for key,value in CPU21Board(led=0x1010).as_dict().items()}
+    args=board_arguments(board)
     assert args[:4]==['--led','0x1010','--seg','0x1004']
-    command=build_hardware_command(state,'space file.s','space out.elf')
-    assert command[3]=='space file.s' and '--qemu' not in command and '--led' in command
 
 
 def test_custom_mmio_values_in_linked_elf(tmp_path):

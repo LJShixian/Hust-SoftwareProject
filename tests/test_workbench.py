@@ -1,6 +1,6 @@
 from mycc import core
 from mycc.gui.workbench import (WorkbenchState,build_request,apply_result,export_asm_diag_lowering,
-    source_offset,load_settings,save_settings,build_run_command)
+    source_offset,load_settings,save_settings)
 
 
 def test_cli_gui_shared_results():
@@ -21,23 +21,20 @@ def test_cli_gui_shared_results():
 
 def test_settings_roundtrip_and_recovery(tmp_path):
     path=tmp_path/'settings.json'
-    assert load_settings(path)[0]['baseline']=='cpu21'
+    assert load_settings(path)[0]['baseline']=='PF-01'
     state=WorkbenchState(baseline='PF-02',enable=['mul'],disable=['div'])
     assert not save_settings(state,path)
-    assert load_settings(path)[0]=={'baseline':'PF-02','enable':['mul'],'disable':['div'],'board':state.board}
+    assert load_settings(path)[0]=={'baseline':'PF-02','enable':['mul'],'disable':['div'],'legacy':{}}
     path.write_text('{invalid')
     assert load_settings(path)[1]
     path.write_text('{"unknown":true}')
     assert load_settings(path)[1]
 
 
-def test_offsets_commands_exports():
+def test_offsets_exports():
     assert source_offset('a\n\t汉字\n',2,3)==4
     assert source_offset('',1,1)==0
     state=WorkbenchState(path='path with spaces.c',enable=['div'],disable=['lui'])
-    commands=build_run_command(state,'build/space file.s')
-    assert commands[0][3]=='build/space file.s'
-    assert '--enable' in commands[0] and '--disable' in commands[0]
     assert export_asm_diag_lowering(state)==('','','')
 
 
@@ -52,14 +49,12 @@ def test_offscreen_window(tmp_path,monkeypatch):
     monkeypatch.setattr(workbench,'settings_path',lambda:tmp_path/'gui.json')
     app=QApplication.instance() or QApplication([])
     window=MainWindow()
-    window.board_fields['led'].setText('0x1010')
-    window.board_fields['vga_base'].setText('0x3000')
-    window.board_fields['seg'].setText('0x1014')
-    assert window.state.board['led']=='0x1010'
-    window.profile.setCurrentIndex(0)
-    assert window.state.baseline=='PF-01'
-    assert not window.checkboxes['divrem'].isEnabled()
-    assert not window.checkboxes['byteload'].isEnabled()
+    assert not hasattr(window,'board_fields')
+    assert not hasattr(window,'process')
+    window.profile.setCurrentIndex(4)
+    assert window.state.baseline=='PF-05'
+    assert window.checkboxes['divrem'].isEnabled()
+    assert window.checkboxes['byteload'].isEnabled()
     window.editor.setPlainText('int main(){return 42;}')
     window.editor.document().setModified(False)
     window.start_compile()
@@ -71,6 +66,5 @@ def test_offscreen_window(tmp_path,monkeypatch):
     assert 'addi a0,zero,42' in window.outputs['汇编'].toPlainText()
     window.close()
     second=MainWindow()
-    assert second.board_fields['vga_base'].text()=='0x3000'
-    assert second.board_fields['seg'].text()=='0x1014'
+    assert second.state.baseline=='PF-05'
     second.close()

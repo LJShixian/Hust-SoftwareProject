@@ -1,0 +1,64 @@
+# 0.3.0 范围收敛实施记录
+
+日期：2026-10-26　变更单：CR-SCOPE-001。
+
+## 先定范围，再修改程序
+
+用户确认以“受限 C + 可用 ISA → GNU RISC-V 汇编、诊断和 Lowering 说明”为主线。范围说明先以独立提交 **989e49d** 保存，随后才修改实现。此前 CPU21 适配版本 **3dd6451** 和历史验收文件保留。
+
+## 已完成的调整
+
+| 调整 | 当前实现 |
+|---|---|
+| 恢复编译器默认行为 | CLI/GUI 默认 generic/PF-01；普通编译不导入 adapters，不要求外部工具链 |
+| 收敛主界面 | 保留编辑、ISA、编译/取消、结果/诊断及导出；移除 MMIO、构建、QEMU、进程输出和 ELF lint |
+| ISA 独立于板卡 | 合法预设和组均可选择；cpu21 作为参考 ISA，不隐式切换 ABI |
+| 移出硬件事实 | CPU21Board、能力检查、VGA 函数签名、固定布局和启动资产进入 adapters/cpu21 |
+| 通用策略注入 | core 仅消费 CodegenPolicy 和 externals；生成器不包含 CPU21 特判，不导入适配层 |
+| 外部资产归位 | CPU21、generic 裸机与 QEMU 启动/链接资产集中到 adapters；通用算术/内存函数留在 runtime |
+| 旧设置留存 | schema_version=2；旧 board 字段迁入 legacy，提示但不应用到编译 |
+| 文档留痕 | 新增 SRS v1.4、SDD v1.3；旧 CPU21 修订增加后续修订导航，正文与旧证据保留 |
+
+## 本次验证
+
+- **115 项自动化测试通过，1 项因本机缺少 QEMU 跳过**。原有覆盖率硬门槛通过，语句/分支综合覆盖率约 92%。
+- SC-CORE-01：`compiler_demo.c` 的函数/循环/算术生成 GNU 汇编，并通过真实 GNU 汇编器。
+- SC-CORE-02：同一源码有/无 mul 的汇编与 Lowering 原因不同，AST 相同；可选 CPU21 外部执行均输出预期的 `55`。
+- SC-CORE-03：语法/语义错误定位，失败不覆盖输出，非法 ISA 给出建议。
+- 新进程断言普通 CLI 编译不导入 adapters；静态检查核心无板卡事实/适配导入，GUI 不包含外部进程或地址配置。
+- GUI offscreen 编译、全部 ISA 预设可用、设置迁移/往返和源码诊断保留。
+- **18 组正式 CPU21 固件执行回归通过**：此前 16 组场景继续有效，新增 compiler_demo 的有/无 mul 两组；每组核对返回状态和全部 600 个显存字。两组栈故障以预期 STAK 状态判定通过。
+- FPGA 项目 81 份文件前后 SHA-256 一致，未回写任何硬件源文件。
+
+0.3.0 独立证据：[执行结果](verification/scope-results-0.3.0-2026-10-26.json)。0.2.0 的 `cpu21-results-2026-10-26.json` 未覆盖。
+
+## 使用方式
+
+```powershell
+# 主流程
+.\launch.cmd
+python -m mycc bench/compiler_demo.c -o demo.s
+python -m mycc bench/compiler_demo.c --enable mul -o demo-mul.s --dump-lowering-report
+
+# 开发验证
+.\check.cmd
+
+# 显式外部集成
+python -m tools.build bench/compiler_demo.c --target cpu21 -o build/cpu21-demo
+.\check.cmd --cpu21 --fpga-root D:\Xilinx\Project\risc-v
+```
+
+## 迁移索引
+
+| 0.2.0 位置/入口 | 0.3.0 位置/入口 |
+|---|---|
+| core.CPU21Board / core.check_target | adapters.cpu21.CPU21Board / adapters.check_target |
+| core 编译只传 target=cpu21 | adapters.cpu21.compile 或显式 options/policy 注入 |
+| runtime/cpu21-start.s、cpu21-console.c | adapters/cpu21/runtime/start.s、console.c |
+| linker/cpu21.ld、isa/cpu21.board.json | adapters/cpu21/linker.ld、board.json |
+| isa/cpu21.json | adapters/cpu21/isa.json |
+| runtime/start.s、linker/link.ld | adapters/generic/runtime/start.s、linker.ld |
+| runtime/qemu.s、linker/qemu.ld | adapters/qemu/runtime.s、linker.ld |
+| 默认板卡构建 | 显式 tools.build --target cpu21 |
+
+尚未验证 QEMU/GCC 执行对照、Linux 三环境 CI 或物理上板。RARS 输出、完整扫雷和语言扩展按范围说明暂缓；不以本次范围调整宣称这些能力已完成。

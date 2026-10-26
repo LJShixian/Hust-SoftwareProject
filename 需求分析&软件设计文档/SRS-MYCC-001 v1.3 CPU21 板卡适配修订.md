@@ -1,3 +1,5 @@
+> **Historical revision**: defaults and product scope are superseded by [SRS-MYCC-001 v1.4 编译器范围收敛修订.md](SRS-MYCC-001%20v1.4%20编译器范围收敛修订.md). Hardware protocol and previous evidence remain preserved.
+
 # SRS-MYCC-001 v1.3 — CPU21 板卡适配修订
 
 | 项目 | 内容 |

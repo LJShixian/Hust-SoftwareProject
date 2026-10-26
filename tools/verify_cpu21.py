@@ -48,6 +48,7 @@ def expected_screen(text):
 
 
 OUTPUTS={
+    'compiler_demo':'55\n',
     'hello':'Hi\n42\n0x80000000\n','fib':'55\n','arrays':'1 5 15\n',
     'control':'0 19\n','muldiv':'-85 -3 -2\n-85 -3 2\n85 3 -2\n-2147483648 -2147483648 0\n0 -1 123\n',
     'shifts':'0x468acf00 0xfc000000 0x64606468\n','pointers':'3 7 16\n',
@@ -68,7 +69,7 @@ def verify(root=DEFAULT_FPGA,output=None,cases=None):
     try:
         run_command([tools['xvlog'],'-sv',*sorted(rtl.glob('*.v')),ROOT/'tests/rtl/cpu21_program_tb.v'],out,out/'xvlog.log')
         run_command([tools['xelab'],'work.cpu21_program_tb','-s','cpu21_program','-debug','typical'],out,out/'xelab.log')
-        cases=cases or [(name,[]) for name in OUTPUTS]+[('arrays',['lui']),('shifts',['vshift']),('muldiv',['mul']),('cpu21_selftest',['lui','vshift'])]
+        cases=cases or [(name,[]) for name in OUTPUTS]+[('arrays',['lui']),('shifts',['vshift']),('muldiv',['mul']),('cpu21_selftest',['lui','vshift']),('compiler_demo',['mul'])]
         for index,(name,disabled) in enumerate(cases):
             profile=core.load_profile('cpu21',disable=disabled)
             stem=out/f'{index:02}-{name}'

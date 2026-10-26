@@ -25,11 +25,11 @@ def compare(source,profile=None,output=None):
         if i==1: args.insert(1,'-Dmain=__runtime_unused_main')
         invoke(args)
     # Link GCC output against exactly the same software arithmetic and I/O shim.
-    for i,path in enumerate([ROOT/'runtime/runtime.s',ROOT/'runtime/qemu.s']):
+    for i,path in enumerate([ROOT/'runtime/runtime.s',ROOT/'adapters/qemu/runtime.s']):
         obj=output/f'asm{i}.o'; objects.append(obj)
         invoke([tool('as'),'-march=rv32i','-mabi=ilp32','-mno-relax',path,'-o',obj])
     gccelf=output/'gcc.elf'
-    invoke([tool('ld'),'-m','elf32lriscv','--no-relax','-T',ROOT/'linker/qemu.ld',*objects,'-o',gccelf])
+    invoke([tool('ld'),'-m','elf32lriscv','--no-relax','-T',ROOT/'adapters/qemu/linker.ld',*objects,'-o',gccelf])
     results=[subprocess.run([qemu,str(elf)],capture_output=True,timeout=30) for elf in (myelf,gccelf)]
     a,b=results
     if (a.returncode,a.stdout,a.stderr)!=(b.returncode,b.stdout,b.stderr):

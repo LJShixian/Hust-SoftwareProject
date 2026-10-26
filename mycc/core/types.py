@@ -77,61 +77,6 @@ class ProfileError(Exception):
         self.code = code
 
 
-@dataclass(frozen=True)
-class BoardAddresses:
-    uart_tx: int = 0x10000000
-    vga_base: int = 0x20000000
-    exit_status: int = 0x10000004
-
-    @classmethod
-    def from_mapping(cls,data):
-        keys={'uart_tx','vga_base','exit_status'}
-        if not isinstance(data,dict) or set(data)!=keys:
-            raise ValueError('MMIO configuration requires uart_tx, vga_base, exit_status')
-        values={}
-        for key,value in data.items():
-            try: value=int(str(value),0)
-            except (TypeError,ValueError): raise ValueError(f'{key}: enter a hexadecimal 0x... or decimal address')
-            if not 0<=value<=0xfffffffc or value%4:
-                raise ValueError(f'{key}: address must be 32-bit and 4-byte aligned')
-            values[key]=value
-        return cls(**values)
-
-    def as_dict(self):
-        return {'uart_tx':self.uart_tx,'vga_base':self.vga_base,'exit_status':self.exit_status}
-
-
-@dataclass(frozen=True)
-class CPU21Board:
-    led: int = 0x1000
-    seg: int = 0x1004
-    vga_base: int = 0x2000
-    display_ctrl: int = 0x1140
-    display_cursor: int = 0x1144
-    mouse_ctrl: int = 0x110c
-
-    def as_dict(self):
-        return {name:getattr(self,name) for name in self.__dataclass_fields__}
-
-    @classmethod
-    def from_mapping(cls,data):
-        if not isinstance(data,dict) or set(data)!=set(cls.__dataclass_fields__):
-            raise ValueError('CPU21 MMIO requires led, seg, vga_base, display_ctrl, display_cursor, mouse_ctrl; UART is unavailable')
-        values={}
-        for name,raw in data.items():
-            try: value=int(str(raw),0)
-            except (ValueError,TypeError): raise ValueError(f'{name}: enter a hexadecimal or decimal address')
-            if value%4 or not 0x1000<=value<0x8000:
-                raise ValueError(f'{name}: CPU21 MMIO must be aligned and within 0x1000..0x7FFC')
-            values[name]=value
-        if values['vga_base']+2400>0x8000:
-            raise ValueError('VGA buffer exceeds the CPU21 low-address MMIO range')
-        if len(set(values.values()))!=len(values):
-            raise ValueError('CPU21 MMIO registers must have distinct addresses')
-        if any(values['vga_base']<=value<values['vga_base']+2400 for name,value in values.items() if name!='vga_base'):
-            raise ValueError('CPU21 control registers overlap the VGA framebuffer')
-        return cls(**values)
-
 
 def fail(reporter, token, stage, code, message, note=""):
     reporter.report(Diagnostic(token.file, token.line, token.col, code, message,
@@ -195,11 +140,35 @@ def constant(n):
     raise ValueError("expected an integer constant expression")
 
 
+@dataclass(frozen=True)
+class CodegenPolicy:
+    """Environment-neutral hooks populated by an external runtime adapter."""
+    name: str = 'generic'
+    globals_in_bss: bool = False
+    initializer: str = ''
+    data_address_bits: int = 0
+    stack_guard_symbol: str = ''
+    stack_guard_margin: int = 0
+    stack_guard_trap: str = ''
+
+    def __post_init__(self):
+        if not 0<=self.data_address_bits<=12:
+            raise ValueError('bounded data addresses must fit the low 12-bit relocation')
+        if self.globals_in_bss and not self.initializer:
+            raise ValueError('BSS initialization policy needs an initializer symbol')
+        if self.stack_guard_symbol and (not self.stack_guard_trap or not self.data_address_bits):
+            raise ValueError('stack guard needs a bounded address policy and trap symbol')
+        if not 0<=self.stack_guard_margin<=2047:
+            raise ValueError('stack guard margin must fit a signed I immediate')
+
+
 @dataclass
 class CompileOptions:
     cancelled: object = None
     require_main: bool = True
     target: str = 'generic'
+    policy: CodegenPolicy = field(default_factory=CodegenPolicy)
+    externals: dict = field(default_factory=dict)
 
 
 @dataclass

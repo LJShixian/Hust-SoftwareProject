@@ -2,7 +2,7 @@
 from time import perf_counter
 from .types import (SourceFile, CompileOptions, CompileResult, CompileError, Diagnostic,
                     MemoryReporter, ProfileError, Reporter)
-from .isa import ISAProfile, load_profile, check_feasible, check_target, dump_isa, dump_isa_whitelist
+from .isa import ISAProfile, load_profile, check_feasible, dump_isa, dump_isa_whitelist
 from .lexer import tokenize
 from .parser import parse
 from .sema import analyze
@@ -32,10 +32,11 @@ def ast_text(n,level=0):
 
 def compile(src,profile=None,reporter=None,options=None):
     options=options or CompileOptions()
-    profile=profile or load_profile('cpu21' if options.target=='cpu21' else 'PF-01')
+    profile=profile or load_profile()
     check_feasible(profile)
     reporter=reporter or MemoryReporter()
-    check_target(profile,options.target)
+    if options.target!=options.policy.name:
+        raise ProfileError('external target requires an adapter-supplied code generation policy',64)
     result=CompileResult(source=src)
     collected=MemoryReporter()
 
@@ -61,7 +62,7 @@ def compile(src,profile=None,reporter=None,options=None):
         result.tokens_text=''.join(f'{t.line}:{t.col}\t{t.kind}\t{t.text}\n' for t in tokens)
         prog=stage('parse',lambda:parse(tokens,r))
         if r.has_error(): raise CompileError('parse errors')
-        prog=stage('sema',lambda:analyze(prog,r,options.require_main))
+        prog=stage('sema',lambda:analyze(prog,r,options.require_main,options.externals))
         result.ast_text=ast_text(prog)
         if not r.has_error(): result.asm,result.lowering,result.ir_text=stage('codegen',lambda:generate(prog,profile,options))
     except CompileError:

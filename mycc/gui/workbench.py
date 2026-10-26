@@ -1,22 +1,21 @@
-"""Pure Python workbench model shared by tests and the Qt view."""
+"""Pure compiler workbench model, independent of boards and process runners."""
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import sys
 from .. import core
 
 
 @dataclass
 class WorkbenchState:
-    text: str = 'int main(void) {\n    printint(6 * 7);\n    return 0;\n}\n'
+    text: str = 'int square(int x) { return x * x; }\n\nint main(void) {\n    return square(7);\n}\n'
     path: str = '<untitled>'
-    baseline: str = 'cpu21'
+    baseline: str = 'PF-01'
     enable: list = field(default_factory=list)
     disable: list = field(default_factory=list)
     result: object = None
     last_asm: str = ''
     stale: bool = False
-    board: dict = field(default_factory=lambda:{key:hex(value) for key,value in core.CPU21Board().as_dict().items()})
+    legacy: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -36,16 +35,15 @@ class UiModel:
 
 
 def build_request(state):
-    profile=core.load_profile(state.baseline,state.enable,state.disable)
-    core.check_target(profile,'cpu21')
-    return CompileRequest(core.SourceFile(state.text,state.path),profile,core.CompileOptions(target='cpu21'))
+    return CompileRequest(core.SourceFile(state.text,state.path),
+                          core.load_profile(state.baseline,state.enable,state.disable),core.CompileOptions())
 
 
 def apply_result(state,res):
     state.result=res
     if res.success: state.last_asm=res.asm
     state.stale=not res.success
-    status='已取消' if res.cancelled else ('编译成功' if res.success else '编译失败 · 汇编为上次成功结果')
+    status='已取消' if res.cancelled else ('编译成功 · GNU 汇编' if res.success else '编译失败 · 汇编为上次成功结果')
     status+=f' · {sum(res.stages_ms.values()):.1f} ms · {len(res.asm.splitlines())} 行'
     return UiModel(state.last_asm,sorted(res.diagnostics,key=lambda d:(d.line,d.col)),
                    core.dump_lowering_report(res),status,state.stale)
@@ -71,43 +69,34 @@ def settings_path():
     return Path.home()/'.config'/'mycc'/'gui.json'
 
 
+def default_settings():
+    return {'baseline':'PF-01','enable':[],'disable':[],'legacy':{}}
+
+
 def load_settings(path=None):
     try:
         data=json.loads((path or settings_path()).read_text(encoding='utf-8'))
-        if not isinstance(data,dict) or set(data)-{'baseline','enable','disable','board'}: raise ValueError('unknown settings fields')
+        if not isinstance(data,dict) or set(data)-{'schema_version','baseline','enable','disable','legacy','board'}:
+            raise ValueError('unknown settings fields')
+        if data.get('schema_version',2)!=2: raise ValueError('unsupported settings version')
         core.load_profile(data['baseline'],data.get('enable',[]),data.get('disable',[]))
-        core.check_target(core.load_profile(data['baseline'],data.get('enable',[]),data.get('disable',[])),'cpu21')
-        if 'board' in data: board_arguments(data['board'])
-        return data,''
-    except FileNotFoundError: return {'baseline':'cpu21','enable':[],'disable':[]},''
+        legacy=data.get('legacy',{})
+        if not isinstance(legacy,dict): raise ValueError('legacy must be an object')
+        message=''
+        if 'board' in data:
+            legacy={**legacy,'board':data['board']}
+            message='旧板卡地址设置已保存在 legacy 中；当前工作台仅编译汇编'
+        return {'baseline':data['baseline'],'enable':data.get('enable',[]),
+                'disable':data.get('disable',[]),'legacy':legacy},message
+    except FileNotFoundError: return default_settings(),''
     except (OSError,ValueError,KeyError,TypeError,core.ProfileError):
-        return {'baseline':'cpu21','enable':[],'disable':[]},'旧设置不兼容 CPU21 或已损坏，已恢复板卡默认值'
+        return default_settings(),'设置损坏，已恢复编译器默认值'
 
 
 def save_settings(state,path=None):
     try:
         target=path or settings_path(); target.parent.mkdir(parents=True,exist_ok=True)
-        target.write_text(json.dumps({'baseline':state.baseline,'enable':state.enable,'disable':state.disable,'board':state.board},indent=2),encoding='utf-8')
+        data={'schema_version':2,'baseline':state.baseline,'enable':state.enable,'disable':state.disable,'legacy':state.legacy}
+        target.write_text(json.dumps(data,indent=2),encoding='utf-8')
         return ''
     except OSError as exc: return f'无法保存设置: {exc}'
-
-
-def build_run_command(state,output='build/workbench-run.c'):
-    return [[sys.executable,'-m','tools.build',output,'--profile',state.baseline,
-             *[arg for x in state.enable for arg in ('--enable',x)],
-             *[arg for x in state.disable for arg in ('--disable',x)],'--qemu'],
-            ['qemu-riscv32',str(Path(output).with_suffix('.elf'))]]
-
-
-def board_arguments(board):
-    addresses=core.CPU21Board.from_mapping(board).as_dict()
-    result=[]
-    for key in addresses:
-        result.extend(['--'+key.replace('_','-'),hex(addresses[key])])
-    return result
-
-
-def build_hardware_command(state,source,output):
-    return [sys.executable,'-m','tools.build',source,'-o',output,'--target','cpu21','--profile',state.baseline,
-            *[arg for x in state.enable for arg in ('--enable',x)],
-            *[arg for x in state.disable for arg in ('--disable',x)],*board_arguments(state.board)]

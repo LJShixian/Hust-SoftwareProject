@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mycc"
-version = "0.2.0"
+version = "0.3.0"
 description = "Capability-driven C subset compiler for RV32IM"
 requires-python = ">=3.11"
 dependencies = []
@@ -17,7 +17,12 @@ test = ["pytest>=8,<10", "coverage>=7,<8"]
 mycc = "mycc.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mycc*"]
+include = ["mycc*", "adapters*"]
+
+[tool.setuptools.package-data]
+"adapters.cpu21" = ["*.ld", "*.json", "runtime/*.s", "runtime/*.c", "*.md"]
+"adapters.generic" = ["*.ld", "runtime/*.s", "*.md"]
+"adapters.qemu" = ["*.ld", "*.s", "*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

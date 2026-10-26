@@ -2,12 +2,11 @@
 from pathlib import Path
 import os
 import threading
-import sys
-from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, QProcess, QTimer, Qt
+from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool, Qt
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QKeySequence, QTextCursor, QColor, QSyntaxHighlighter, QTextCharFormat
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPlainTextEdit, QTabWidget, QComboBox, QCheckBox, QLabel, QTableWidget,
-    QTableWidgetItem, QFileDialog, QMessageBox, QAbstractItemView, QTextEdit, QLineEdit, QApplication, QScrollArea)
+    QTableWidgetItem, QFileDialog, QMessageBox, QAbstractItemView, QTextEdit, QApplication, QScrollArea)
 from . import workbench as model
 
 
@@ -57,10 +56,9 @@ class MainWindow(QMainWindow):
             for name in ('consola.ttf','msyh.ttc','segoeui.ttf'):
                 QFontDatabase.addApplicationFont(str(fontdir/name))
             QApplication.setFont(QFont('Microsoft YaHei',10))
-        self.state=model.WorkbenchState(); self.worker=None; self.process=None; self.commands=[]
+        self.state=model.WorkbenchState(); self.worker=None
         self.setWindowTitle('mycc · RISC-V 编译工作台'); self.resize(1200,850)
         self.pool=QThreadPool(self); self.pool.setMaxThreadCount(1)
-        self.timer=QTimer(self); self.timer.setSingleShot(True); self.timer.timeout.connect(self.timeout)
         font=QFont('Consolas',11)
         self.editor=QPlainTextEdit(); self.editor.setFont(font); self.editor.setPlainText(self.state.text)
         self.editor.setTabStopDistance(self.editor.fontMetrics().horizontalAdvance(' ')*4)
@@ -79,31 +77,20 @@ class MainWindow(QMainWindow):
         source=QWidget(); source_layout=QHBoxLayout(source); source_layout.setContentsMargins(0,0,0,0)
         source_layout.addWidget(self.line_numbers); source_layout.addWidget(self.editor)
         panel=QWidget(); pl=QVBoxLayout(panel)
-        note=QLabel('CPU21 · Harvard · ROM 32 KiB / RAM 4 KiB\nUART 不可用；退出状态 → LED / 七段数码管\nVGA：40×30；小写转大写；0/O、9/Q 共用字形')
+        note=QLabel('C 子集 → GNU RISC-V 汇编\n选择可用指令，查看生成代码和回退原因\nISA 选择不改变 C 子集的支持范围')
         note.setWordWrap(True); pl.addWidget(note)
-        pl.addWidget(QLabel('目标指令集'))
+        pl.addWidget(QLabel('可用指令集'))
         self.profile=QComboBox()
         for i,name in enumerate(model.core.PRESETS,1):
             value='cpu21' if name=='cpu21' else f'PF-{i:02}'
-            self.profile.addItem('CPU21 · 实际板卡' if name=='cpu21' else f'PF-{i:02} · {name}',value)
-            if model.core.PRESETS[name]-model.core.CPU21_INSTRUCTIONS:
-                self.profile.model().item(i-1).setEnabled(False)
+            self.profile.addItem('cpu21 · 硬件参考 ISA' if name=='cpu21' else f'PF-{i:02} · {name}',value)
         self.profile.currentIndexChanged.connect(self.profile_changed); pl.addWidget(self.profile)
         self.checkboxes={}
         for name in ('mul','divrem','xor','cmpbr','byteload','auipc','lui','vshift'):
             cb=QCheckBox(name); self.checkboxes[name]=cb; cb.stateChanged.connect(self.capability_changed); pl.addWidget(cb)
-            if model.core.GROUPS[name]-model.core.CPU21_INSTRUCTIONS:
-                cb.setEnabled(False); cb.setToolTip('CPU21 硬件未实现')
         self.isa_summary=QLabel(); self.isa_summary.setWordWrap(True); pl.addWidget(self.isa_summary)
-        pl.addWidget(QLabel('FPGA MMIO 地址（默认值已核对）'))
-        self.board_fields={}
-        for key,title in [('led','LED / 退出状态'),('seg','七段数码管'),('vga_base','VGA 显存'),
-                          ('display_ctrl','显示控制'),('display_cursor','光标位置'),('mouse_ctrl','鼠标中断控制')]:
-            pl.addWidget(QLabel(title)); field=QLineEdit(self.state.board[key]); self.board_fields[key]=field
-            field.setToolTip('支持 0x 十六进制或十进制；必须 4 字节对齐，位于 0x1000..0x7FFC。默认值对应已核对的板卡。')
-            field.textChanged.connect(self.board_changed); pl.addWidget(field)
         pl.addStretch()
-        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(panel); scroll.setMinimumWidth(330)
+        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(panel); scroll.setMinimumWidth(300)
         top=QSplitter(); top.addWidget(source); top.addWidget(scroll); top.setSizes([850,330])
         self.diagnostics=QTableWidget(0,4); self.diagnostics.setHorizontalHeaderLabels(['级别','位置','诊断码','消息'])
         self.diagnostics.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -111,38 +98,32 @@ class MainWindow(QMainWindow):
         self.diagnostics.horizontalHeader().setStretchLastSection(True)
         self.diagnostics.cellDoubleClicked.connect(self.jump)
         self.tabs=QTabWidget(); self.outputs={}
-        for title in ('汇编','Token','AST','IR','Lowering 报告','运行输出','工具输出'):
+        for title in ('汇编','Token','AST','IR','Lowering 报告'):
             view=QPlainTextEdit(); view.setReadOnly(True); view.setFont(font)
             self.outputs[title]=view; self.tabs.addTab(view,title)
         vertical=QSplitter(Qt.Vertical); vertical.addWidget(top); vertical.addWidget(self.diagnostics); vertical.addWidget(self.tabs)
         vertical.setSizes([400,120,300]); self.setCentralWidget(vertical)
         toolbar=self.addToolBar('工作台')
-        menus={name:self.menuBar().addMenu(name) for name in ('文件','编译','运行','视图','帮助')}
+        menus={name:self.menuBar().addMenu(name) for name in ('文件','编译','视图','帮助')}
         def action(label,slot,key=None,menu='文件'):
             a=QAction(label,self); a.triggered.connect(slot)
             if key: a.setShortcut(QKeySequence(key))
             menus[menu].addAction(a)
-            if label in ('新建','打开','保存','编译','取消编译','QEMU 运行','终止','构建 FPGA','lint'): toolbar.addAction(a)
+            if label in ('新建','打开','保存','编译','取消编译','导出汇编'): toolbar.addAction(a)
             return a
         action('新建',self.new_file,'Ctrl+N'); action('打开',self.open_file,'Ctrl+O')
         action('保存',self.save_file,'Ctrl+S'); action('另存为',self.save_as,'Ctrl+Shift+S')
-        action('导出汇编',self.export_asm); action('导出诊断',self.export_diagnostics); action('导出 Lowering',self.export_lowering)
+        action('导出汇编',self.export_asm,'Ctrl+Shift+E'); action('导出诊断',self.export_diagnostics); action('导出 Lowering',self.export_lowering)
         self.compile_action=action('编译',self.start_compile,'F5','编译')
         action('取消编译',self.cancel_compile,menu='编译')
-        action('QEMU 运行',self.run_program,'F6','运行'); action('终止',self.stop_process,menu='运行')
-        action('构建 FPGA',self.build_hardware,menu='编译')
-        action('lint',self.lint,menu='编译')
         action('放大',lambda:self.zoom(1),'Ctrl++','视图'); action('缩小',lambda:self.zoom(-1),'Ctrl+-','视图')
-        action('环境检查',self.doctor,menu='帮助')
-        action('关于',lambda:QMessageBox.information(self,'mycc','mycc 0.2.0 · CPU21\nPySide6 6.8.3 / LGPL-3.0\n仅使用动态链接，源码分发。'),'','帮助')
+        action('关于',lambda:QMessageBox.information(self,'mycc','mycc 0.3.0\nPySide6 6.8.3 / LGPL-3.0\n仅使用动态链接，源码分发。'),'','帮助')
+        action('外部工具与适配说明',self.external_tools_help,menu='帮助')
         settings,message=model.load_settings()
         idx=self.profile.findData(settings['baseline']); self.profile.setCurrentIndex(max(0,idx))
         self.state.baseline=self.profile.currentData(); self.state.enable=settings['enable']; self.state.disable=settings['disable']
-        if settings.get('board'):
-            self.state.board=settings['board']
-            for key,field in self.board_fields.items():
-                field.blockSignals(True); field.setText(str(self.state.board[key])); field.blockSignals(False)
-        self.sync_capabilities(); self.statusBar().showMessage(message or '就绪 · F5 编译，F6 运行')
+        self.state.legacy=settings['legacy']
+        self.sync_capabilities(); self.statusBar().showMessage(message or '就绪 · F5 编译，Ctrl+Shift+E 导出汇编')
         self.highlight()
 
     def update_numbers(self,*_):
@@ -165,13 +146,6 @@ class MainWindow(QMainWindow):
     def profile_changed(self):
         self.state.baseline=self.profile.currentData(); self.state.enable=[]; self.state.disable=[]; self.sync_capabilities()
         self.changed()
-
-    def board_changed(self):
-        self.state.board={key:field.text() for key,field in self.board_fields.items()}
-        try:
-            model.board_arguments(self.state.board)
-            self.statusBar().showMessage('MMIO 地址已修改，下次 FPGA 构建生效')
-        except ValueError as exc: self.statusBar().showMessage(str(exc))
 
     def sync_capabilities(self):
         p=model.core.load_profile(self.state.baseline,self.state.enable,self.state.disable)
@@ -271,70 +245,16 @@ class MainWindow(QMainWindow):
         selection.cursor.movePosition(QTextCursor.Right,QTextCursor.KeepAnchor,max(1,d.end_col-d.col))
         selection.format.setBackground(QColor('#ffcccc')); self.editor.setExtraSelections([selection])
 
-    def start_commands(self,commands,tab):
-        if self.process: self.statusBar().showMessage('已有任务在运行'); return
-        self.commands=list(commands); self.process_tab=tab; self.outputs[tab].clear(); self.next_command()
-
-    def next_command(self):
-        if not self.commands: self.process=None; return
-        args=self.commands.pop(0); out=self.outputs[self.process_tab]
-        out.appendPlainText('> '+repr(args)); self.tabs.setCurrentWidget(out)
-        self.process=QProcess(self); self.process.setWorkingDirectory(str(Path(__file__).resolve().parents[2]))
-        proc=self.process
-        self.process.readyReadStandardOutput.connect(lambda:out.appendPlainText(bytes(proc.readAllStandardOutput()).decode('utf-8',errors='replace')))
-        self.process.readyReadStandardError.connect(lambda:out.appendPlainText(bytes(proc.readAllStandardError()).decode('utf-8',errors='replace')))
-        self.process.finished.connect(self.process_finished); self.process.errorOccurred.connect(self.process_error)
-        self.process.start(args[0],args[1:]); self.timer.start(30000)
-
-    def process_error(self,_):
-        if not self.process: return
-        self.outputs[self.process_tab].appendPlainText('启动失败: '+self.process.errorString())
-        self.timer.stop(); self.commands=[]; self.process.deleteLater(); self.process=None
-
-    def process_finished(self,code,_):
-        self.timer.stop(); self.outputs[self.process_tab].appendPlainText(f'退出码: {code}')
-        if self.process: self.process.deleteLater(); self.process=None
-        if code: self.commands=[]
-        self.next_command()
-
-    def timeout(self):
-        self.stop_process(); self.outputs[self.process_tab].appendPlainText('已超时终止 (30 s)')
-
-    def stop_process(self):
-        self.commands=[]; self.timer.stop()
-        if self.process: self.process.kill()
-
-    def run_program(self):
-        if not self.state.last_asm or self.state.stale: self.statusBar().showMessage('请先成功编译当前源码'); return
-        root=Path(__file__).resolve().parents[2]; path=root/'build'/'workbench-run.c'; path.parent.mkdir(exist_ok=True)
-        try: path.write_text(self.state.text,encoding='utf-8')
-        except OSError as exc: self.statusBar().showMessage(str(exc)); return
-        self.start_commands(model.build_run_command(self.state,str(path)),'运行输出')
-
-    def build_hardware(self):
-        if not self.state.last_asm or self.state.stale: self.statusBar().showMessage('请先成功编译当前源码'); return
-        try: model.board_arguments(self.state.board)
-        except ValueError as exc: QMessageBox.warning(self,'MMIO 地址无效',str(exc)); return
-        output,_=QFileDialog.getSaveFileName(self,'选择 FPGA 构建输出路径','build/firmware.elf','ELF (*.elf)')
-        if not output: return
-        source=Path(output).with_suffix('.s')
-        try: source.write_text(self.state.last_asm,encoding='utf-8')
-        except OSError as exc: QMessageBox.warning(self,'构建失败',str(exc)); return
-        self.start_commands([model.build_hardware_command(self.state,str(source),output)],'工具输出')
-
-    def lint(self):
-        if not self.state.last_asm or self.state.stale: self.statusBar().showMessage('请先编译，再运行生成的 ELF 后执行 lint'); return
-        path=Path(__file__).resolve().parents[2]/'build'/'workbench.s'; path.parent.mkdir(exist_ok=True)
-        try: path.write_text(self.state.last_asm,encoding='utf-8')
-        except OSError as exc: self.statusBar().showMessage(str(exc)); return
-        command=model.build_hardware_command(self.state,str(path),str(path.with_suffix('.elf')))
-        self.start_commands([command,[sys.executable,'-m','tools.lint',str(path.with_suffix('.elf')),'--target','cpu21','--profile',self.state.baseline,
-            *[arg for x in self.state.enable for arg in ('--enable',x)],*[arg for x in self.state.disable for arg in ('--disable',x)]]],'工具输出')
-
-    def doctor(self): self.start_commands([[sys.executable,'-m','mycc','--doctor']],'工具输出')
+    def external_tools_help(self):
+        QMessageBox.information(self,'外部工具与适配',
+            '当前工作台输出 GNU 汇编；最终地址、启动和外设由外部工具链提供。\n\n'
+            '软件辅助函数：runtime/runtime.s\n'
+            '可选 QEMU：python -m tools.build SOURCE.c --qemu\n'
+            'CPU21 示例：python -m tools.build SOURCE.c --target cpu21\n'
+            'CPU21 配置及说明：adapters/cpu21/README.md\n\n'
+            'RARS 格式兼容与完整扫雷暂缓。外部命令需在终端中显式执行。')
 
     def closeEvent(self,event):
         if not self.confirm_discard(): event.ignore(); return
-        self.cancel_compile(); self.pool.waitForDone(); self.stop_process()
-        if self.process: self.process.waitForFinished(3000)
+        self.cancel_compile(); self.pool.waitForDone()
         model.save_settings(self.state); event.accept()

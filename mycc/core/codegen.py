@@ -1,6 +1,6 @@
 """Stack-based ILP32 emission with ordered capability-guarded lowering rules."""
 from dataclasses import dataclass
-from .types import INT, i32
+from .types import INT, i32, CodegenPolicy
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,8 @@ LOWERING_TABLE = {
 class Generator:
     def __init__(self,profile,options=None):
         self.profile=profile; self.lines=['.option norvc','.option norelax']
-        self.target=options.target if options else 'generic'
+        self.policy=options.policy if options else CodegenPolicy()
+        self.target=self.policy.name
         self.library=options is not None and not options.require_main
         self.global_initializers=[]
         self.serial=0; self.lowering=[]; self.ir=[]; self.loops=[]
@@ -79,11 +80,10 @@ class Generator:
         if symbol.global_:
             if self.profile.has('lui'):
                 self.emit(f'lui {rd},%hi({symbol.name})',f'addi {rd},{rd},%lo({symbol.name})')
-            elif self.target=='cpu21':
-                # Globals live in the 4 KiB RAM. %lo is a supported I relocation;
-                # zero-extension recovers bits 11:0 when %lo is negative.
-                self.emit(f'addi {rd},zero,%lo({symbol.name})',f'slli {rd},{rd},20',f'srli {rd},{rd},20')
-                self.lowering.append(('ADDRESS','CPU21 Harvard address via relocations; no ROM loads',('missing lui',)))
+            elif self.policy.data_address_bits:
+                shift=32-self.policy.data_address_bits
+                self.emit(f'addi {rd},zero,%lo({symbol.name})',f'slli {rd},{rd},{shift}',f'srli {rd},{rd},{shift}')
+                self.lowering.append(('ADDRESS','bounded RAM address via relocations; no ROM loads',('missing lui',)))
             else:
                 pc,done=self.label('pc'),self.label('addr')
                 self.emit(f'jal {rd},{pc}',pc+':',f'lw {rd},8({rd})',f'jal zero,{done}',f'.word {symbol.name}',done+':')
@@ -98,20 +98,19 @@ class Generator:
         self.emit(f'sw {reg},0(sp)')
 
     def stack_check(self):
-        if self.target!='cpu21': return
+        symbol=self.policy.stack_guard_symbol
+        if not symbol: return
         if self.profile.has('lui'):
-            self.emit('lui t3,%hi(__bss_end)','addi t3,t3,%lo(__bss_end)')
+            self.emit(f'lui t3,%hi({symbol})',f'addi t3,t3,%lo({symbol})')
         else:
-            # BSS end is <= 2048. Its I relocation can be -2048 at the
-            # boundary. Correct that with MV-ISA only, before stack writes.
+            # Correct a signed low relocation with MV-ISA only, before writes.
             positive=self.label('bss_positive')
-            self.emit('addi t3,zero,%lo(__bss_end)','slt t4,t3,zero',f'beq t4,zero,{positive}',
-                      'addi t3,t3,2047','addi t3,t3,2047','addi t3,t3,2',positive+':')
+            self.emit(f'addi t3,zero,%lo({symbol})','slt t4,t3,zero',f'beq t4,zero,{positive}')
+            count,remainder=divmod(1<<self.policy.data_address_bits,2047)
+            self.emit(*(['addi t3,t3,2047']*count),f'addi t3,t3,{remainder}',positive+':')
         done=self.label('stack_ok')
-        # CPU21 addresses are low positive values. Signed comparison also catches
-        # a large frame wrapping sp below zero before any stack write occurs.
-        self.emit('addi t3,t3,128','slt t4,sp,t3',f'beq t4,zero,{done}',
-                  'jal zero,__mycc_stack_overflow',done+':')
+        self.emit(f'addi t3,t3,{self.policy.stack_guard_margin}','slt t4,sp,t3',f'beq t4,zero,{done}',
+                  f'jal zero,{self.policy.stack_guard_trap}',done+':')
 
     def pop(self,reg='t0'):
         self.emit(f'lw {reg},0(sp)','addi sp,sp,16')
@@ -232,7 +231,7 @@ class Generator:
         for n in prog.children:
             if n.kind!='decl': continue
             values=n.symbol.initial or []
-            if self.target=='cpu21':
+            if self.policy.globals_in_bss:
                 self.emit('.section .bss','.balign 4',f'.globl {n.symbol.name}',n.symbol.name+':',f'.zero {n.type.size}')
                 self.global_initializers.extend((n.symbol,index*4,value) for index,value in enumerate(values) if value)
                 continue
@@ -241,8 +240,8 @@ class Generator:
             remainder=n.type.size-4*len(values)
             if remainder: self.emit(f'.zero {remainder}')
         self.emit('.section .text')
-        if self.target=='cpu21' and not self.library:
-            self.emit('.globl __mycc_init_globals','__mycc_init_globals:')
+        if self.policy.initializer and not self.library:
+            self.emit(f'.globl {self.policy.initializer}',self.policy.initializer+':')
             for symbol,offset,value in self.global_initializers:
                 self.address(symbol,'t0'); self.const(offset,'t1'); self.emit('add t0,t0,t1')
                 self.const(value); self.emit('sw a0,0(t0)')
