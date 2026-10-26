@@ -10,13 +10,13 @@ from .. import core
 class WorkbenchState:
     text: str = 'int main(void) {\n    printint(6 * 7);\n    return 0;\n}\n'
     path: str = '<untitled>'
-    baseline: str = 'PF-01'
+    baseline: str = 'cpu21'
     enable: list = field(default_factory=list)
     disable: list = field(default_factory=list)
     result: object = None
     last_asm: str = ''
     stale: bool = False
-    board: dict = field(default_factory=lambda:dict(uart_tx='0x10000000',vga_base='0x20000000',exit_status='0x10000004'))
+    board: dict = field(default_factory=lambda:{key:hex(value) for key,value in core.CPU21Board().as_dict().items()})
 
 
 @dataclass(frozen=True)
@@ -36,8 +36,9 @@ class UiModel:
 
 
 def build_request(state):
-    return CompileRequest(core.SourceFile(state.text,state.path),
-                          core.load_profile(state.baseline,state.enable,state.disable),core.CompileOptions())
+    profile=core.load_profile(state.baseline,state.enable,state.disable)
+    core.check_target(profile,'cpu21')
+    return CompileRequest(core.SourceFile(state.text,state.path),profile,core.CompileOptions(target='cpu21'))
 
 
 def apply_result(state,res):
@@ -75,11 +76,12 @@ def load_settings(path=None):
         data=json.loads((path or settings_path()).read_text(encoding='utf-8'))
         if not isinstance(data,dict) or set(data)-{'baseline','enable','disable','board'}: raise ValueError('unknown settings fields')
         core.load_profile(data['baseline'],data.get('enable',[]),data.get('disable',[]))
+        core.check_target(core.load_profile(data['baseline'],data.get('enable',[]),data.get('disable',[])),'cpu21')
         if 'board' in data: board_arguments(data['board'])
         return data,''
-    except FileNotFoundError: return {'baseline':'PF-01','enable':[],'disable':[]},''
+    except FileNotFoundError: return {'baseline':'cpu21','enable':[],'disable':[]},''
     except (OSError,ValueError,KeyError,TypeError,core.ProfileError):
-        return {'baseline':'PF-01','enable':[],'disable':[]},'设置损坏，已恢复默认值'
+        return {'baseline':'cpu21','enable':[],'disable':[]},'旧设置不兼容 CPU21 或已损坏，已恢复板卡默认值'
 
 
 def save_settings(state,path=None):
@@ -90,7 +92,7 @@ def save_settings(state,path=None):
     except OSError as exc: return f'无法保存设置: {exc}'
 
 
-def build_run_command(state,output='build/workbench.s'):
+def build_run_command(state,output='build/workbench-run.c'):
     return [[sys.executable,'-m','tools.build',output,'--profile',state.baseline,
              *[arg for x in state.enable for arg in ('--enable',x)],
              *[arg for x in state.disable for arg in ('--disable',x)],'--qemu'],
@@ -98,14 +100,14 @@ def build_run_command(state,output='build/workbench.s'):
 
 
 def board_arguments(board):
-    addresses=core.BoardAddresses.from_mapping(board).as_dict()
+    addresses=core.CPU21Board.from_mapping(board).as_dict()
     result=[]
-    for key in ('uart_tx','vga_base','exit_status'):
+    for key in addresses:
         result.extend(['--'+key.replace('_','-'),hex(addresses[key])])
     return result
 
 
 def build_hardware_command(state,source,output):
-    return [sys.executable,'-m','tools.build',source,'-o',output,'--profile',state.baseline,
+    return [sys.executable,'-m','tools.build',source,'-o',output,'--target','cpu21','--profile',state.baseline,
             *[arg for x in state.enable for arg in ('--enable',x)],
             *[arg for x in state.disable for arg in ('--disable',x)],*board_arguments(state.board)]

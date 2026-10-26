@@ -1,0 +1,82 @@
+# CPU21 FPGA 只读兼容性验证
+
+> **历史记录：本报告针对 mycc 0.1.0。** 其中的不兼容问题是 0.2.0 适配的输入，原始失败证据保留；当前状态参见 [CPU21 适配与验收记录](CPU21_ADAPTATION.md)。
+
+日期：2026-10-26。硬件项目：`D:/Xilinx/Project/risc-v`。软件版本：mycc `60473a5`。
+
+**结论：目前的 mycc 固件不能直接在这颗 FPGA CPU 上运行。编译核心的测试程序可以在原始 CPU RTL 上执行，但启动、内存布局和外设运行时需要在 SoftwareEngineering 项目内适配。无需为此修改 FPGA 项目。**
+
+## 只读保证
+
+- 未执行 FPGA 项目的构建脚本（其脚本会回写 ROM `.vh`），未修改 RTL、约束、ROM、链接脚本或 Git 配置。
+- Vivado 2025.2 的 xvlog/xelab/xsim 只读取原始 RTL；全部编译缓存、测试平台、临时启动代码、固件、日志和波形位于本项目 `build/riscv-audit/`。
+- 验证前后，对 `rg --files --hidden -g !.git` 列出的 81 份文件逐一比较 SHA-256，零变化；目标仓库 `git --no-optional-locks status --porcelain` 前后均为空。
+- 证据：`build/riscv-audit/source-before.json`、`source-after.json`、`read-only-verification.json`。
+
+## 以源码为准的硬件事实
+
+| 项目 | FPGA 实际实现 | 与当前软件的差异 |
+|---|---|---|
+| 指令 ROM | 默认 8192 个 32 位字，即 32 KiB；复位取指地址 0 | 容量一致 |
+| 数据 RAM | 独立地址空间，从 0 开始的 1024 个字，即 4 KiB；仅响应 `< 0x1000` | mycc 链接脚本配置在 `0x8000` 的 16 KiB RAM 和栈顶 `0xC000` 不存在 |
+| 存储结构 | 哈佛结构：数据 load 访问 RAM，不能读出指令 ROM 中的常量 | mycc 启动代码和无 lui 的地址回退从代码中的 `.word` 读取地址，无法工作 |
+| 整数指令 | 已支持 lui、寄存器移位、xor、所有六种条件分支、sltiu、mul | 这些扩展可用，不必再等待硬件补指令 |
+| M 扩展 | mul/mulh/mulhsu/mulhu/divu/remu | 没有**有符号** div/rem；C 子集 `/` 和 `%` 必须使用软件运行时 |
+| 数据加载 | lw | 没有 lb/lbu/lh/lhu；也没有 auipc |
+| LED / 七段数码管 | `0x1000` / `0x1004` | 不是 UART / 专用退出状态寄存器 |
+| 鼠标 / 显示控制 | `0x1100` 起 / `0x1140` 起 | 现有运行时未对接这些协议 |
+| VGA 显存 | 窗口 `0x2000..0x2FFF`，实际有效 2400 字节；40×30 格，每格 2 字节 | mycc 假设 80×25 格、每格 4 字节，不能只改基址 |
+| VGA 字形 | 低字节的低 6 位是专用字形编号，高字节低 3 位为颜色；包含游戏图案和 A–Z 等字形 | 不能直接把 ASCII 编码写入当作字符 |
+| UART / 退出 | 当前 MMIO 无 UART 和专用退出状态外设；CPU 支持 ecall 停机语义 | 软件示例中的 `0x10000000`、`0x10000004` 是占位地址，不能用于此板卡 |
+
+主要源码依据：
+
+- `D:/Xilinx/Project/risc-v/pipelined-cpu/srcs/rtl/cpu21_riscv_decoder.v:125`：M 扩展译码；`:204` 起为 load/store 译码。
+- `D:/Xilinx/Project/risc-v/pipelined-cpu/srcs/board/cpu21_board_top.v:37`：ROM/RAM 默认参数；`:234` 起为数据 RAM 与地址选择。
+- `D:/Xilinx/Project/risc-v/pipelined-cpu/srcs/rtl/cpu21_mmio.v:89`：MMIO 地址译码。
+- `D:/Xilinx/Project/risc-v/pipelined-cpu/srcs/rtl/cpu21_vga.v:85`：显存单元解包；`:104` 起为字形表。
+- `D:/Xilinx/Project/risc-v/saolei/sw/linker.ld`：现有扫雷程序的哈佛布局，明确禁止 `.data` 和 `.rodata`。
+
+## 原始 RTL 实际仿真
+
+使用原始 `cpu21_riscv_redirect_int_bpb` 及其子模块，模拟与板级顶层一致的 32 KiB ROM、4 KiB 数据 RAM 和字节写使能。测试不注入中断；未进行综合、下载或真实上板。
+
+测试程序覆盖递归、函数调用、数组、带副作用下标的复合赋值、短路布尔、指针、sizeof、正负除法/余数、除零、INT_MIN/-1、变量移位和异或。全部检查通过时返回 **42**，检查失败返回对应编号。
+
+| 场景 | 日志结果 | 解释 |
+|---|---|---|
+| 当前生产启动代码 + hello 固件 | 第 24 周期 `INVALID_STORE addr=fffffffc` | 栈初始化失败，随后向非法地址保存返回地址，确认不能直接运行 |
+| 测试专用启动 + PF-01 | 返回 42，4458 周期 | 编译核心 + 软件乘除法测试通过 |
+| 测试专用启动 + mul/xor/cmpbr | 返回 42，4392 周期 | 硬件乘法等指令路径通过；仍使用软件有符号除法 |
+| 测试专用启动 + PF-03 | 返回 42，4540 周期 | 软件变量移位回退路径通过 |
+| 测试专用启动 + PF-05 | 返回 **14**，773 周期 | `-17/5` 或 `-17%5` 检查失败，复现缺少有符号 div/rem 的问题 |
+| 测试专用启动 + PF-02 | 返回 **23**，4499 周期 | 两个独立全局变量的赋值/读回检查失败，复现从代码字面量池取地址的问题 |
+
+**测试专用启动只存在于 `build/riscv-audit/verification-start.s`**：使用 CPU 支持的 lui/addi 建立栈与 BSS 地址，并把返回结果写到 LED 寄存器。没有替换项目的 `runtime/start.s`，也没有修改 FPGA 工程。三个通过的场景不等于生产启动、VGA 或上板已通过。
+
+所有 xsim 进程正常退出；仿真进程退出码 0 不代表测试通过，判断依据为日志中的 `RESULT=42` 或明确的错误编号。完整结果：`build/riscv-audit/results.json`。
+
+## 内置 profile 核对
+
+| Profile | 声明了硬件不支持的指令 |
+|---|---|
+| PF-01 base | 无 |
+| PF-02 base-nolui | 无，但本软件的全局地址回退不适配哈佛结构 |
+| PF-03 base-novshift | 无 |
+| PF-04 full-i | auipc |
+| PF-05 i+m | div、rem |
+| PF-06 byteload | lb、lbu、lh、lhu |
+| PF-07 all | auipc、div、rem、lb、lbu、lh、lhu |
+
+可用于后续适配的编译器能力集合为 **PF-01 + mul + xor + cmpbr，共 32 条**。已在输出目录生成 `compiler-compatible-isa.json`，它仅描述编译器可使用的硬件子集，不是硬件全部能力，也不保证当前运行时可上板。
+
+## 需要在软件侧适配的内容
+
+1. 增加此板卡专用哈佛链接布局：ROM 32 KiB、RAM 4 KiB；保持栈对齐并做容量检查。初始化全局变量必须生成代码逐项初始化，或在板卡模式明确拒绝；不能假定从 ROM memcpy 到 RAM。
+2. 启动代码使用立即数/重定位加载地址，禁止从指令空间 `.word` 取数据。无 lui 地址回退同样需要重新实现或在该板卡模式拒绝。
+3. 选择实际支持的指令集，保留软件有符号除法/余数，不能用 divu/remu 直接替代有符号语义。
+4. VGA 改为 40×30、2 字节单元和专用字形/颜色编码；UART 明确显示为不可用。退出状态可选择 LED/七段显示后自旋，作为软件约定，不能称作现有专用退出外设。
+5. 按 FPGA 项目的 32 位字 ROM 格式导出镜像；当前通用 objcopy Verilog 输出是字节格式，不应直接传给 `reg [31:0] rom[]`。
+6. 如要支持现有鼠标/关卡中断，另需板卡专用中断入口与寄存器保存策略；本次无中断测试没有验证该项。
+
+本次仅验证并记录结果，未实施上述软件适配，也未修改任何 FPGA 项目文件。

@@ -50,7 +50,7 @@ def test_bare_metal_no_lui_and_no_vshift(tmp_path):
     except RuntimeError: pytest.skip('RISC-V GNU toolchain unavailable')
     p=core.load_profile('PF-01',disable=['lui','vshift'])
     elf=build(ROOT/'bench/arrays.c',p,False,tmp_path/'arrays')
-    assert not lint(elf,p)
+    assert not lint(elf,p,target='cpu21')
 
 
 def test_lint_sensitive_to_profile(tmp_path):

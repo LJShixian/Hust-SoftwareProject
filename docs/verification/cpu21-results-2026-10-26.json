@@ -1,0 +1,134 @@
+{
+  "results": [
+    {
+      "program": "hello",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 14833,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "fib",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 21207,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "arrays",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 12957,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "control",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 9741,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "muldiv",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 78210,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "shifts",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 19879,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "pointers",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 12524,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "cpu21_selftest",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 11829,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "cpu21_vga",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 4608,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "cpu21_wrap",
+      "disabled": [],
+      "exit_status": 0,
+      "cycles": 422593,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "cpu21_stack",
+      "disabled": [],
+      "exit_status": 1398030667,
+      "cycles": 14365,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "cpu21_large_frame",
+      "disabled": [],
+      "exit_status": 1398030667,
+      "cycles": 4269,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "arrays",
+      "disabled": [
+        "lui"
+      ],
+      "exit_status": 0,
+      "cycles": 13665,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "shifts",
+      "disabled": [
+        "vshift"
+      ],
+      "exit_status": 0,
+      "cycles": 22241,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "muldiv",
+      "disabled": [
+        "mul"
+      ],
+      "exit_status": 0,
+      "cycles": 79172,
+      "vga_words_verified": 600
+    },
+    {
+      "program": "cpu21_selftest",
+      "disabled": [
+        "lui",
+        "vshift"
+      ],
+      "exit_status": 0,
+      "cycles": 12646,
+      "vga_words_verified": 600
+    }
+  ],
+  "read_only": {
+    "files_checked": 81,
+    "unchanged": true,
+    "changed": []
+  },
+  "elapsed_seconds": 50.45299999997951,
+  "software_version": "0.2.0",
+  "command": "check.cmd --cpu21 --fpga-root D:/Xilinx/Project/risc-v",
+  "rtl_files_sha256": "9cbc4b1e72934d31b353bfc841cf6c77ad122d9286bc1a6855392afb166aabc3"
+}

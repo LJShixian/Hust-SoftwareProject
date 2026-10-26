@@ -1,0 +1,8 @@
+{
+  "led": "0x1000",
+  "seg": "0x1004",
+  "vga_base": "0x2000",
+  "display_ctrl": "0x1140",
+  "display_cursor": "0x1144",
+  "mouse_ctrl": "0x110c"
+}

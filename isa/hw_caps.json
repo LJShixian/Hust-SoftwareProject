@@ -1,6 +1,6 @@
 {
-  "name": "hardware_example",
-  "description": "EXAMPLE ONLY: replace with actual hardware capabilities",
+  "name": "cpu21_hardware_subset",
+  "description": "Verified compiler-relevant CPU21 hardware subset; full RTL also implements unsigned M and system instructions",
   "schema_version": 1,
   "instructions": [
     "add",
@@ -8,12 +8,16 @@
     "and",
     "andi",
     "beq",
+    "bge",
+    "bgeu",
     "blt",
+    "bltu",
     "bne",
     "jal",
     "jalr",
     "lui",
     "lw",
+    "mul",
     "or",
     "ori",
     "sb",
@@ -21,6 +25,7 @@
     "slli",
     "slt",
     "slti",
+    "sltiu",
     "sltu",
     "sra",
     "srai",
@@ -28,6 +33,7 @@
     "srli",
     "sub",
     "sw",
+    "xor",
     "xori"
   ]
 }

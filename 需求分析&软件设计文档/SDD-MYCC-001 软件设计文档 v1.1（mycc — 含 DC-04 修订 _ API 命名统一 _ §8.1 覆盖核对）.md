@@ -1,3 +1,5 @@
+> **Historical baseline (2026-10-26)**: original text preserved for traceability. The active baseline includes [SDD-MYCC-001 v1.2 CPU21 板卡适配修订.md](SDD-MYCC-001%20v1.2%20CPU21%20板卡适配修订.md); conflicting clauses are superseded by that revision.
+
 # mycc 设计文档（SDD-MYCC-001 v1.1）
 
 **对应需求基线**：SRS-MYCC-001 v1.2（实验 1 文档，本设计沿用其全部编号）  

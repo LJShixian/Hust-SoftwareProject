@@ -1,0 +1,62 @@
+# CPU21 软件适配与验收记录
+
+日期：2026-10-26。软件版本：mycc 0.2.0。变更单：**CR-CPU21-001**。
+
+## 当前状态
+
+CPU21 现为 CLI、GUI 和 FPGA 构建器的默认目标。正式构建器输出的 ROM 可以由原始 CPU RTL 直接执行，不再需要替换测试启动代码。此次验证为 RTL 仿真，没有下载物理 FPGA，也没有改动 `D:/Xilinx/Project/risc-v` 中的文件。
+
+历史核验中复现的错误保留在 [0.1.0 兼容性报告](FPGA_COMPATIBILITY.md)。该报告是本次修复的依据，不能当作 0.2.0 的当前状态。
+
+## 已落实的适配
+
+| 历史问题 | 0.2.0 实现 |
+|---|---|
+| 启动从代码 `.word` 读取栈地址，导致 SP=0 | 正式 `runtime/cpu21-start.s` 使用立即数重定位加载地址；无 lui 时也不读代码常量池 |
+| 软件使用不存在的 `0x8000` 数据 RAM 和 `0xC000` 栈顶 | `linker/cpu21.ld` 使用从 0 开始的独立 4 KiB RAM，栈顶 `0x1000`；保留 2 KiB 栈容量 |
+| 全局初值没有真实 RAM 加载流程 | 所有全局对象分配 BSS；启动清零后执行 `__mycc_init_globals`，用指令写入非零值 |
+| PF-05 产生硬件不支持的 signed div/rem | 新增 cpu21 profile，默认硬件 mul，signed div/rem 软件实现；越界能力编译前拒绝 |
+| 无 lui 的全局变量地址回退不适配哈佛结构 | CPU21 使用低 12 位重定位并零扩展；独立变量和初值执行检查通过 |
+| VGA 尺寸、步长、编码错误 | 40×30、2 字节单元、字形/颜色分别字节写；支持颜色、边界、光标和回绕 |
+| UART/退出地址为占位值 | CPU21 不提供 UART；exit 写实际 LED/SEG 后自旋；GUI 不再显示不存在的外设 |
+| 启动后可能进入未接管 ISR | 在 `_start` 关闭 MIE 和鼠标中断源；仿真保留默认 MIE=1 并注入 IRQ 检验 |
+| 栈耗尽可静默破坏数据 | 函数帧和临时栈写入前检查，保留 128 字节运行时余量；故障输出 STAK |
+| 字节 hex 不匹配 32 位 ROM | 默认 `.hex` 导出 8192 个 32 位字，NOP 补齐；另存 `.bytes.hex`，附 manifest |
+
+## 验收结果
+
+执行：
+
+```powershell
+.\check.cmd --cpu21 --fpga-root D:\Xilinx\Project\risc-v
+```
+
+- **108 项自动化测试通过，1 项因缺少 QEMU 跳过**；保留原有 54 组合 generic 汇编/链接/ISA 检查。
+- 覆盖率门槛全部通过：core ≥80% 语句/≥60% 分支，codegen/sema/isa 各 ≥90% 语句，CLI ≥70%，GUI ≥60%。总计语句与分支综合覆盖率约 90%。
+- **16 组正式 CPU21 固件执行验收通过**，其中两组是预期栈故障：
+
+| 场景 | 检查 |
+|---|---|
+| hello、fib、arrays、control、muldiv、shifts、pointers | 返回值及全部 600 个 VGA 显存字 |
+| cpu21_selftest | 全局标量/数组初值、独立全局地址、递归、短路、自增、除零、INT_MIN/-1、字节 memcpy/memset |
+| cpu21_vga | 第 0/1/1199 格字形与颜色、越界拒绝、光标行列及启用状态 |
+| cpu21_wrap | 输出跨越全部 1200 格后的回绕，验证尾格和邻格保持 |
+| cpu21_stack | 无限递归，预期 LED/SEG 为 `0x5354414B`，不发生非法 RAM 写入 |
+| cpu21_large_frame | 超过整个 RAM 的局部帧，预期相同故障状态，验证 SP 下溢检查 |
+| arrays 禁用 lui；shifts 禁用 vshift；muldiv 禁用 mul；selftest 同时禁用 lui/vshift | 软件回退与哈佛地址路径 |
+
+测试加载正式 `.hex`，初始 RAM/显存填脏值，检查启动清零和初始化；未替换启动代码。外部项目 81 份文件前后 SHA-256 一致。完整原始结果保存在 `build/cpu21-verification/results.json`，持久副本见 [验收结果 JSON](verification/cpu21-results-2026-10-26.json)。
+
+## 保留的边界
+
+1. **尚未物理上板**。RTL 程序执行通过不等于 bitstream、引脚、时序及实际显示器验证通过。工具只生成软件固件，不自动回写 ROM 或下载开发板。
+2. CPU21 没有 UART；现有字形表也不是完整 ASCII。小写显示为大写，0/O、9/Q 共用字形，其他无字形字符显示问号。这是 GUI/README 中明确展示的输出协议。
+3. 本运行时关闭未接管中断，不支持直接编译并运行原扫雷项目的 GCC 扩展、ISR 或 unsigned/volatile 等超出语言子集的代码。
+4. QEMU/GCC 对照在本机仍未执行；Linux 三环境 CI 尚未实际运行。原有性能/内存等量化条款需要对应测量，本次未将其自动判为通过。
+
+## 文档与代码留痕
+
+- 原 SRS v1.2 / SDD v1.1 正文保留，只增加后续修订导航。
+- 新增 SRS v1.3、SDD v1.2 的 CPU21 修订，列明原/新条款、CSR 例外、字体限制、目标默认值和追溯测试。
+- 原始失败核验报告保留，并标明它描述的是 0.1.0。
+- README、CLI/GUI、板卡 JSON、运行时、链接脚本、单元测试和只读 RTL 验证命令同步更新。

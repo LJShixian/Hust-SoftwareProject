@@ -5,7 +5,7 @@ from mycc.gui.workbench import (WorkbenchState,build_request,apply_result,export
 
 def test_cli_gui_shared_results():
     state=WorkbenchState()
-    req=build_request(state); res=core.compile(req.src,req.profile)
+    req=build_request(state); res=core.compile(req.src,req.profile,options=req.options)
     ui=apply_result(state,res)
     assert ui.asm_text==res.asm
     assert ui.lowering_text==core.dump_lowering_report(res)
@@ -13,7 +13,7 @@ def test_cli_gui_shared_results():
     assert asm==res.asm and not diag and 'MUL' in md
     old=state.last_asm
     state.text='int main(){return missing;}'
-    req=build_request(state); res=core.compile(req.src,req.profile)
+    req=build_request(state); res=core.compile(req.src,req.profile,options=req.options)
     ui=apply_result(state,res)
     assert ui.asm_text==old and ui.stale_flags
     assert export_asm_diag_lowering(state)[1]==''.join(core.format_with_caret(d,req.src) for d in res.diagnostics)
@@ -21,7 +21,7 @@ def test_cli_gui_shared_results():
 
 def test_settings_roundtrip_and_recovery(tmp_path):
     path=tmp_path/'settings.json'
-    assert load_settings(path)[0]['baseline']=='PF-01'
+    assert load_settings(path)[0]['baseline']=='cpu21'
     state=WorkbenchState(baseline='PF-02',enable=['mul'],disable=['div'])
     assert not save_settings(state,path)
     assert load_settings(path)[0]=={'baseline':'PF-02','enable':['mul'],'disable':['div'],'board':state.board}
@@ -52,12 +52,14 @@ def test_offscreen_window(tmp_path,monkeypatch):
     monkeypatch.setattr(workbench,'settings_path',lambda:tmp_path/'gui.json')
     app=QApplication.instance() or QApplication([])
     window=MainWindow()
-    window.board_fields['uart_tx'].setText('0x30000000')
-    window.board_fields['vga_base'].setText('0x30001000')
-    window.board_fields['exit_status'].setText('0x30000008')
-    assert window.state.board['uart_tx']=='0x30000000'
-    window.profile.setCurrentIndex(4)
-    assert window.state.baseline=='PF-05'
+    window.board_fields['led'].setText('0x1010')
+    window.board_fields['vga_base'].setText('0x3000')
+    window.board_fields['seg'].setText('0x1014')
+    assert window.state.board['led']=='0x1010'
+    window.profile.setCurrentIndex(0)
+    assert window.state.baseline=='PF-01'
+    assert not window.checkboxes['divrem'].isEnabled()
+    assert not window.checkboxes['byteload'].isEnabled()
     window.editor.setPlainText('int main(){return 42;}')
     window.editor.document().setModified(False)
     window.start_compile()
@@ -69,6 +71,6 @@ def test_offscreen_window(tmp_path,monkeypatch):
     assert 'addi a0,zero,42' in window.outputs['汇编'].toPlainText()
     window.close()
     second=MainWindow()
-    assert second.board_fields['vga_base'].text()=='0x30001000'
-    assert second.board_fields['exit_status'].text()=='0x30000008'
+    assert second.board_fields['vga_base'].text()=='0x3000'
+    assert second.board_fields['seg'].text()=='0x1014'
     second.close()

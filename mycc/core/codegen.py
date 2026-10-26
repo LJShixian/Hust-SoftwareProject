@@ -32,8 +32,11 @@ LOWERING_TABLE = {
 
 
 class Generator:
-    def __init__(self,profile):
+    def __init__(self,profile,options=None):
         self.profile=profile; self.lines=['.option norvc','.option norelax']
+        self.target=options.target if options else 'generic'
+        self.library=options is not None and not options.require_main
+        self.global_initializers=[]
         self.serial=0; self.lowering=[]; self.ir=[]; self.loops=[]
 
     def emit(self,*lines): self.lines.extend(lines)
@@ -76,6 +79,11 @@ class Generator:
         if symbol.global_:
             if self.profile.has('lui'):
                 self.emit(f'lui {rd},%hi({symbol.name})',f'addi {rd},{rd},%lo({symbol.name})')
+            elif self.target=='cpu21':
+                # Globals live in the 4 KiB RAM. %lo is a supported I relocation;
+                # zero-extension recovers bits 11:0 when %lo is negative.
+                self.emit(f'addi {rd},zero,%lo({symbol.name})',f'slli {rd},{rd},20',f'srli {rd},{rd},20')
+                self.lowering.append(('ADDRESS','CPU21 Harvard address via relocations; no ROM loads',('missing lui',)))
             else:
                 pc,done=self.label('pc'),self.label('addr')
                 self.emit(f'jal {rd},{pc}',pc+':',f'lw {rd},8({rd})',f'jal zero,{done}',f'.word {symbol.name}',done+':')
@@ -85,7 +93,25 @@ class Generator:
             self.emit(f'add {rd},s0,{rd}')
 
     def push(self,reg='a0'):
-        self.emit('addi sp,sp,-16',f'sw {reg},0(sp)')
+        self.emit('addi sp,sp,-16')
+        self.stack_check()
+        self.emit(f'sw {reg},0(sp)')
+
+    def stack_check(self):
+        if self.target!='cpu21': return
+        if self.profile.has('lui'):
+            self.emit('lui t3,%hi(__bss_end)','addi t3,t3,%lo(__bss_end)')
+        else:
+            # BSS end is <= 2048. Its I relocation can be -2048 at the
+            # boundary. Correct that with MV-ISA only, before stack writes.
+            positive=self.label('bss_positive')
+            self.emit('addi t3,zero,%lo(__bss_end)','slt t4,t3,zero',f'beq t4,zero,{positive}',
+                      'addi t3,t3,2047','addi t3,t3,2047','addi t3,t3,2',positive+':')
+        done=self.label('stack_ok')
+        # CPU21 addresses are low positive values. Signed comparison also catches
+        # a large frame wrapping sp below zero before any stack write occurs.
+        self.emit('addi t3,t3,128','slt t4,sp,t3',f'beq t4,zero,{done}',
+                  'jal zero,__mycc_stack_overflow',done+':')
 
     def pop(self,reg='t0'):
         self.emit(f'lw {reg},0(sp)','addi sp,sp,16')
@@ -202,14 +228,25 @@ class Generator:
             self.emit(f'jal zero,{start}',end+':')
 
     def generate(self,prog):
+        self.emit(f'# mycc-target: {self.target}')
         for n in prog.children:
             if n.kind!='decl': continue
             values=n.symbol.initial or []
+            if self.target=='cpu21':
+                self.emit('.section .bss','.balign 4',f'.globl {n.symbol.name}',n.symbol.name+':',f'.zero {n.type.size}')
+                self.global_initializers.extend((n.symbol,index*4,value) for index,value in enumerate(values) if value)
+                continue
             self.emit('.section .data' if values else '.section .bss','.balign 4',f'.globl {n.symbol.name}',n.symbol.name+':')
             for value in values: self.emit(f'.word {value}')
             remainder=n.type.size-4*len(values)
             if remainder: self.emit(f'.zero {remainder}')
         self.emit('.section .text')
+        if self.target=='cpu21' and not self.library:
+            self.emit('.globl __mycc_init_globals','__mycc_init_globals:')
+            for symbol,offset,value in self.global_initializers:
+                self.address(symbol,'t0'); self.const(offset,'t1'); self.emit('add t0,t0,t1')
+                self.const(value); self.emit('sw a0,0(t0)')
+            self.emit('jalr zero,0(ra)')
         for n in prog.children:
             if n.kind!='func': continue
             used=8
@@ -219,7 +256,9 @@ class Generator:
             self.epilogue=self.label('return')
             self.emit('.balign 4',f'.globl {n.symbol.name}',f'.type {n.symbol.name},@function',n.symbol.name+':',
                       'addi t0,s0,0','addi t1,sp,0')
-            self.const(-frame,'t2'); self.emit('add sp,sp,t2','addi s0,t1,0','sw ra,-4(s0)','sw t0,-8(s0)')
+            self.const(-frame,'t2'); self.emit('add sp,sp,t2')
+            self.stack_check()
+            self.emit('addi s0,t1,0','sw ra,-4(s0)','sw t0,-8(s0)')
             for i,p in enumerate(n.children[:-1]):
                 self.address(p.symbol,'t0'); self.emit(f'sw a{i},0(t0)')
             self.statement(n.children[-1]); self.const(0)
@@ -227,8 +266,8 @@ class Generator:
         return '\n'.join(self.lines)+'\n'
 
 
-def generate(prog,profile):
-    generator=Generator(profile)
+def generate(prog,profile,options=None):
+    generator=Generator(profile,options)
     asm=lower_assembly(generator.generate(prog),profile)
     ir=''.join(f'{i}\t{op}\t'+ '\t'.join(map(str,args))+'\n' for i,(op,args) in enumerate(generator.ir))
     return asm,generator.lowering,ir

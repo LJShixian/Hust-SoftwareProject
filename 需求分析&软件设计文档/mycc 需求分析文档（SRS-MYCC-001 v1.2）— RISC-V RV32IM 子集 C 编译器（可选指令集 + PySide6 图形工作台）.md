@@ -1,3 +1,5 @@
+> **Historical baseline (2026-10-26)**: original text preserved for traceability. The active baseline includes [SRS-MYCC-001 v1.3 CPU21 板卡适配修订.md](SRS-MYCC-001%20v1.3%20CPU21%20板卡适配修订.md); conflicting clauses are superseded by that revision.
+
 # 需求分析文档（SRS）
 
 ## mycc — 面向自研 RISC-V CPU 的 C 子集编译器（支持可选指令集与图形化工作台）

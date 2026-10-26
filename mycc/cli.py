@@ -22,7 +22,8 @@ def parser():
     p.add_argument('source',nargs='?')
     p.add_argument('-o',default='a.s')
     p.add_argument('--version',action='version',version=f'mycc {__version__} | Python {sys.version_info.major}.{sys.version_info.minor} | ISA schema 1')
-    p.add_argument('--profile',default='PF-01')
+    p.add_argument('--target',choices=['cpu21','generic'],default='cpu21')
+    p.add_argument('--profile',default=None)
     p.add_argument('--isa-file')
     p.add_argument('--enable',action='append',default=[])
     p.add_argument('--disable',action='append',default=[])
@@ -44,7 +45,10 @@ def profile_from_args(args):
     disable=list(args.disable)
     if args.no_lui: disable.append('lui')
     if args.no_vshift: disable.append('vshift')
-    return core.load_profile(args.profile,args.enable,disable,data)
+    target=getattr(args,'target','generic')
+    profile=core.load_profile(args.profile or ('cpu21' if target=='cpu21' else 'PF-01'),args.enable,disable,data)
+    core.check_target(profile,target)
+    return profile
 
 
 def atomic_write(path,text):
@@ -95,7 +99,7 @@ def run(argv=None):
     except (OSError,ValueError) as exc:
         print(f'{args.source}:1:1: error: {exc}',file=sys.stderr); return 65
     src=core.SourceFile(text,args.source)
-    result=core.compile(src,profile)
+    result=core.compile(src,profile,options=core.CompileOptions(target=args.target))
     for d in result.diagnostics: sys.stderr.write(core.format_with_caret(d,src))
     for flag,fn in [('tokens',core.dump_tokens),('ast',core.dump_ast),('ir',core.dump_ir),('lowering_report',core.dump_lowering_report)]:
         if getattr(args,'dump_'+flag): sys.stdout.write(fn(result))

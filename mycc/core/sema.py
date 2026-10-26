@@ -17,6 +17,7 @@ BUILTINS = {
     'putchar': (VOID, [INT]), 'printint': (VOID, [INT]), 'printhex': (VOID, [INT]),
     'exit': (VOID, [INT]), 'memcpy': (PTR, [PTR, PTR, INT]),
     'memset': (PTR, [PTR, INT, INT]),
+    'vga_cell': (VOID, [INT, INT, INT]), 'vga_cursor': (VOID, [INT, INT]),
 }
 
 
@@ -32,6 +33,8 @@ class Analyzer:
         fail(self.reporter, n.token, 'sema', code, message, 'use int values, int pointers and matching function arguments')
 
     def declare(self, n, global_=False, params=None):
+        if str(n.value).startswith('__mycc_'):
+            self.error(n,'__mycc_ names are reserved for the runtime','E-SEMA-RESERVED-ID')
         if n.value in self.scopes[-1]: self.error(n, f"duplicate definition of '{n.value}'", 'E-SEMA-DUPLICATE-ID')
         if n.type == VOID and n.kind != 'func': self.error(n, 'variables and parameters cannot have void type')
         s = Symbol(n.value, n.type, global_, params)

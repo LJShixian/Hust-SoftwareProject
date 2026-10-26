@@ -2,7 +2,7 @@
 from time import perf_counter
 from .types import (SourceFile, CompileOptions, CompileResult, CompileError, Diagnostic,
                     MemoryReporter, ProfileError, Reporter)
-from .isa import ISAProfile, load_profile, check_feasible, dump_isa, dump_isa_whitelist
+from .isa import ISAProfile, load_profile, check_feasible, check_target, dump_isa, dump_isa_whitelist
 from .lexer import tokenize
 from .parser import parse
 from .sema import analyze
@@ -31,10 +31,11 @@ def ast_text(n,level=0):
 
 
 def compile(src,profile=None,reporter=None,options=None):
-    profile=profile or load_profile()
+    options=options or CompileOptions()
+    profile=profile or load_profile('cpu21' if options.target=='cpu21' else 'PF-01')
     check_feasible(profile)
     reporter=reporter or MemoryReporter()
-    options=options or CompileOptions()
+    check_target(profile,options.target)
     result=CompileResult(source=src)
     collected=MemoryReporter()
 
@@ -62,7 +63,7 @@ def compile(src,profile=None,reporter=None,options=None):
         if r.has_error(): raise CompileError('parse errors')
         prog=stage('sema',lambda:analyze(prog,r,options.require_main))
         result.ast_text=ast_text(prog)
-        if not r.has_error(): result.asm,result.lowering,result.ir_text=stage('codegen',lambda:generate(prog,profile))
+        if not r.has_error(): result.asm,result.lowering,result.ir_text=stage('codegen',lambda:generate(prog,profile,options))
     except CompileError:
         pass
     except RecursionError:

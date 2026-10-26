@@ -8,7 +8,9 @@ from .build import tool,profile_args
 from .normalize_mnemonic import normalize
 
 
-def lint(elf,profile,qemu=False):
+def lint(elf,profile,qemu=False,target='generic'):
+    from mycc.core import check_target
+    check_target(profile,target)
     text=subprocess.check_output([tool('objdump'),'-d','-M','no-aliases',str(elf)],text=True,timeout=30)
     allowed=set(profile.instructions)
     function=''; errors=[]
@@ -23,6 +25,7 @@ def lint(elf,profile,qemu=False):
         if mnemonic in ('.word','.4byte','.2byte','.byte'): continue
         # Linux syscalls are restricted to the explicit test shim entry points.
         if qemu and mnemonic=='ecall' and function in ('putchar','exit'): continue
+        if target=='cpu21' and mnemonic=='csrrci' and function=='_start': continue
         if mnemonic not in allowed:
             errors.append(f"lint: ERROR: '{mnemonic}' at 0x{address} ({function}) is not in profile '{profile.name}'")
     return errors
@@ -31,7 +34,8 @@ def lint(elf,profile,qemu=False):
 def main(argv=None):
     p=argparse.ArgumentParser(); p.add_argument('elf'); p.add_argument('--qemu',action='store_true'); profile_args(p)
     a=p.parse_args(argv)
-    try: errors=lint(a.elf,profile_from_args(a),a.qemu)
+    if a.qemu: a.target='generic'
+    try: errors=lint(a.elf,profile_from_args(a),a.qemu,a.target)
     except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as exc:
         print('lint: '+str(exc),file=sys.stderr); return 1
     for error in errors: print(error,file=sys.stderr)

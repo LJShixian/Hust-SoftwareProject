@@ -11,7 +11,10 @@ from .build import ROOT,tool
 
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument('--full',action='store_true'); args=p.parse_args()
+    p=argparse.ArgumentParser(); p.add_argument('--full',action='store_true')
+    p.add_argument('--cpu21',action='store_true',help='verify production firmware on original CPU21 RTL')
+    p.add_argument('--fpga-root',type=Path)
+    args=p.parse_args()
     (ROOT/'build').mkdir(exist_ok=True)
     errors=check()
     if errors:
@@ -51,6 +54,12 @@ def main():
         for program in ('hello','fib','arrays','control','shifts'):
             compare(ROOT/'bench'/f'{program}.c',output=ROOT/'build'/'compare'/program)
         print('GCC execution comparison: ok')
+    if args.cpu21:
+        from .verify_cpu21 import verify,DEFAULT_FPGA
+        try: report=verify(args.fpga_root or DEFAULT_FPGA)
+        except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+            print('CPU21 acceptance failed: '+str(exc)); return 1
+        print(f'CPU21 acceptance: {len(report["results"])} production firmware cases passed; hardware source unchanged')
     return 0
 
 
