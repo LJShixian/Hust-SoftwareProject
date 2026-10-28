@@ -11,12 +11,27 @@ class Symbol:
     params: object = None
     offset: int = 0
     initial: object = None
+    variadic: bool = False
 
 
 BUILTINS = {
     'putchar': (VOID, [INT]), 'printint': (VOID, [INT]), 'printhex': (VOID, [INT]),
+    'printstr': (VOID, [PTR]), 'readint': (VOID, [PTR]), 'readchar': (VOID, [PTR]),
+    'getchar': (INT, []),
     'exit': (VOID, [INT]), 'memcpy': (PTR, [PTR, PTR, INT]),
     'memset': (PTR, [PTR, INT, INT]),
+    'printf': (VOID, [PTR]), 'scanf': (VOID, [PTR]),
+}
+
+# A format string is analysed at compile time, so these two never reach the
+# runtime as functions: the caller's conversions become direct helper calls.
+VARIADIC = {'printf', 'scanf'}
+
+# `%` handling per entry point. `printf` may also print a pointer as text.
+CONVERSIONS = {
+    'printf': {'d': ('printint', INT), 'x': ('printhex', INT),
+               'c': ('putchar', INT), 's': ('printstr', PTR)},
+    'scanf': {'d': ('readint', PTR), 'c': ('readchar', PTR)},
 }
 
 
@@ -24,10 +39,13 @@ class Analyzer:
     def __init__(self, reporter, externals=None):
         self.reporter = reporter
         self.builtins=BUILTINS | (externals or {})
-        self.scopes = [{name: Symbol(name, ret, True, args) for name,(ret,args) in self.builtins.items()}]
+        self.scopes = [{name: Symbol(name, ret, True, args, variadic=name in VARIADIC)
+                        for name,(ret,args) in self.builtins.items()}]
         self.loop = 0
         self.function = None
         self.locals = []
+        self.strings = {}
+        self.string_order = []
 
     def error(self, n, message, code='E-SEMA-TYPE'):
         fail(self.reporter, n.token, 'sema', code, message, 'use int values, int pointers and matching function arguments')
@@ -48,6 +66,64 @@ class Analyzer:
             if n.value in scope: return scope[n.value]
         self.error(n, f"undeclared identifier '{n.value}'", 'E-SEMA-UNDECLARED-ID')
 
+    def literal(self, codes):
+        """Register one literal and return the data label that holds it.
+
+        Identical literals share a label, so `printf("\n")` twice costs one word.
+        """
+        key = tuple(codes)
+        label = self.strings.get(key)
+        if label is None:
+            label = f'.Lstr_{len(self.strings)}'
+            self.strings[key] = label
+            self.string_order.append((label, list(key)))
+        return label
+
+    def format_plan(self, fmt, args, name):
+        """Lower a literal format string into an ordered list of helper calls.
+
+        Doing the scan here rather than in the runtime keeps the argument count and
+        types checkable: a mismatch is a compile error instead of garbage output.
+        """
+        allowed = CONVERSIONS[name]
+        plan, run, index = [], [], 0
+
+        def flush():
+            if run:
+                plan.append(('text', self.literal(run)))
+                del run[:]
+
+        codes = list(fmt.value)
+        i = 0
+        while i < len(codes):
+            if codes[i] != 37:                      # '%'
+                run.append(codes[i]); i += 1; continue
+            if i + 1 >= len(codes):
+                self.error(fmt, "format string ends with a lone '%'", 'E-SEMA-FORMAT')
+            spec = chr(codes[i+1])
+            i += 2
+            if spec == '%':
+                run.append(37); continue
+            if spec not in allowed:
+                choices = ', '.join('%' + key for key in allowed)
+                self.error(fmt, f"'%{spec}' is not supported by {name}; use {choices}", 'E-SEMA-FORMAT')
+            if index >= len(args):
+                self.error(fmt, f"'{name}' format needs more arguments than the {len(args)} given",
+                           'E-SEMA-ARGUMENTS')
+            flush()
+            helper, want = allowed[spec]
+            self.expression(args[index])
+            if not self.compatible(want, args[index]):
+                shape = 'an int pointer' if want.pointer else 'an int'
+                self.error(args[index], f"'%{spec}' expects {shape} argument", 'E-SEMA-FORMAT')
+            plan.append((helper, args[index]))
+            index += 1
+        flush()
+        if index != len(args):
+            self.error(fmt, f"format uses {index} conversion(s) but {len(args)} argument(s) were given",
+                       'E-SEMA-ARGUMENTS')
+        return plan
+
     def compatible(self, typ, n):
         return (typ == INT and n.type == INT) or (typ.pointer and (n.type.pointer or (n.kind == 'num' and n.value == 0)))
 
@@ -59,6 +135,10 @@ class Analyzer:
 
     def expression(self, n):
         if n.kind == 'num': return INT
+        if n.kind == 'str':
+            n.type = PTR
+            n.label = self.literal(n.value)
+            return PTR
         if n.kind == 'id':
             n.symbol = self.lookup(n); n.type = n.symbol.type
             if n.symbol.params is not None: self.error(n, 'function identifiers can only be used in a direct call')
@@ -68,6 +148,14 @@ class Analyzer:
             sym = self.lookup(callee); callee.symbol = sym; n.symbol = sym
             if sym.params is None: self.error(n, f"'{sym.name}' is not a function")
             args = n.children[1:]
+            if sym.variadic:
+                if not args: self.error(n, f"'{sym.name}' needs a format string", 'E-SEMA-ARGUMENTS')
+                if args[0].kind != 'str':
+                    self.error(args[0], f"'{sym.name}' requires a literal format string",
+                               'E-SEMA-FORMAT')
+                n.plan = self.format_plan(args[0], args[1:], sym.name)
+                n.type = VOID
+                return VOID
             if len(args) != len(sym.params): self.error(n, f"'{sym.name}' expects {len(sym.params)} arguments, got {len(args)}", 'E-SEMA-ARGUMENTS')
             for a,t in zip(args,sym.params):
                 self.expression(a)
@@ -230,6 +318,7 @@ class Analyzer:
                 t=n.token
                 self.reporter.report(Diagnostic(t.file,t.line,t.col,'W-SEMA-MISSING-RETURN',
                     'control may reach end of non-void function','sema','warning',note='add a return statement'))
+        prog.strings = list(self.string_order)
         return prog
 
     def returns(self,n):

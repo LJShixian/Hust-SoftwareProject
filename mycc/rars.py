@@ -36,27 +36,18 @@ RUNTIME = ROOT / 'runtime' / 'runtime.s'
 # Data directives that RARS only accepts in the data segment.
 DATA_DIRECTIVES = ('.word', '.byte', '.half', '.space', '.string', '.asciiz', '.float', '.double')
 
-# name -> (ecall number, argument register already holding the value)
+# Platform syscall ABI, the RISC-V convention every toolchain here shares:
+#   a7 = service number, arguments in a0.., result returned in a0.
+# The compiler only needs the three primitives below. `printint` and `printhex`
+# are ordinary C in `runtime/io.c` and are layered on top of `putchar`, which is
+# how a C library normally sits on a platform port.
+SYSCALL_PRINT_CHAR = 11
+SYSCALL_READ_CHAR = 12
+SYSCALL_EXIT = 10
 SHIMS = {
-    'putchar': 11,    # print char, a0
-    'printint': 1,    # print int, a0
-    'printhex': 34,   # print hex, a0
-    'exit': 17,       # exit2, a0 = exit code
-}
-
-# Measured on the real circuit: a7==34 displays a0 and CONTINUES; any other a7
-# halts and waits for `go`. The reference benchmark carries 32 display ecalls and
-# only 5 halting ones (a7=10), so a halt is an explicit section boundary rather
-# than a property of ecall itself. The image therefore maps printhex/printint to
-# a7=34 (hex is the only display this CPU has), putchar to a no-op (no character
-# display), and exit to a7=10, which is how a C program asks for a checkpoint.
-HARDWARE_HALT = 10
-HARDWARE_DISPLAY = 34
-HARDWARE_SHIMS = {
-    'putchar': None,                      # no character display on this CPU
-    'printint': HARDWARE_DISPLAY,         # hex is the only display this CPU has
-    'printhex': HARDWARE_DISPLAY,
-    'exit': HARDWARE_HALT,
+    'putchar': SYSCALL_PRINT_CHAR,   # a0 = character
+    'getchar': SYSCALL_READ_CHAR,    # result in a0
+    'exit': SYSCALL_EXIT,            # a0 = exit status
 }
 
 ENTRY = """\
@@ -72,6 +63,48 @@ ecall
 LABEL = re.compile(r'(?m)^([A-Za-z_.$][\w.$]*):')
 CALL = re.compile(r'(?m)^\s*jal\s+(?:ra|zero|[a-z]\d+)\s*,\s*([A-Za-z_.$][\w.$]*)')
 SINGLE_LABEL = re.compile(r'^([A-Za-z_.$][\w.$]*):$')
+LOCAL_LABEL = re.compile(r'\.L[\w.$]*')
+BLOCK = re.compile(r'(?m)^\.globl\s+(\S+)\s*$')
+DEFINED = re.compile(r'(?m)^([A-Za-z_.$][\w.$]*):')
+
+
+def _relabel(text, prefix):
+    """Prefix the assembler-local labels of one translation unit.
+
+    Codegen numbers local labels per unit (`.Lreturn_1`, `.Lloop_2`, ...), which is
+    safe across separate object files but collides when several units are inlined
+    into one listing. Only `.L` names are touched; function symbols stay global.
+    """
+    return LOCAL_LABEL.sub(lambda match: f'.L{prefix}{match.group(0)[2:]}', text)
+
+
+def _drop_unreferenced(text, external=''):
+    """Drop `.globl` blocks that nothing outside them refers to.
+
+    This is the single-file equivalent of the linker's section garbage collection:
+    `runtime.s` also ships helpers a program never calls, and a 1024-word ROM
+    cannot afford them. A block survives when its exported name *or any label it
+    defines* is still referenced outside it, so a block that also hosts a shared
+    subroutine keeps it when a sibling needs it.
+    """
+    parts = BLOCK.split(text)
+    if len(parts) < 3:
+        return text
+    preamble, segments = parts[0], list(zip(parts[1::2], parts[2::2]))
+    while True:
+        for index, (name, block) in enumerate(segments):
+            outside = external + preamble + ''.join(body for other, (_n, body) in enumerate(segments)
+                                                    if other != index)
+            symbols = [name, *DEFINED.findall(block)]
+            # `\b` does not fire at the dot of `.Lfoo` (both sides are non-word
+            # characters), so use an explicit boundary instead.
+            if not any(re.search(rf'(?<![\w.$]){re.escape(symbol)}(?![\w.$])', outside)
+                       for symbol in symbols):
+                segments.pop(index)
+                break
+        else:
+            break
+    return preamble + ''.join(f'.globl {name}{body}' for name, body in segments)
 
 
 def _rewrite(line):
@@ -97,9 +130,6 @@ def _rewrite(line):
 
 
 def _shim(name, number):
-    if number is None:
-        # A no-op keeps the call site valid without an ecall that would halt.
-        return f'.globl {name}\n{name}:\njalr zero,0(ra)'
     return f'.globl {name}\n{name}:\naddi a7,zero,{number}\necall\njalr zero,0(ra)'
 
 
@@ -189,11 +219,53 @@ def _entry(stack_top, profile):
     return '\n'.join(lines) + '\n'
 
 
-def convert(asm, profile=None, runtime=True, stack_top=None, hardware_io=False):
-    """Return a single-file RARS listing equivalent to the GNU assembly `asm`."""
+# C sources that make up the platform port. `input.c` is separate because it
+# needs a console, which the board and CPU21 runtimes do not provide.
+PORT_SOURCES = ('io.c', 'input.c')
+
+
+def _io_unit(profile):
+    """Compile the C half of the platform port.
+
+    `printint`/`printhex`/`printstr` are ordinary C layered on `putchar`, exactly
+    as a C library sits on top of a platform's character primitive. Keeping them in
+    C means the simulator and the board run the same library code.
+    """
+    from .core import CompileOptions, SourceFile, compile as compile_source
+    units = []
+    for name in PORT_SOURCES:
+        path = ROOT / 'runtime' / name
+        if not path.exists():
+            continue
+        result = compile_source(SourceFile(path.read_text(encoding='utf-8'), f'<runtime/{name}>'),
+                                profile, options=CompileOptions(require_main=False))
+        if not result.success:
+            raise ValueError(''.join(result.diagnostics))
+        units.append(result.asm)
+    return units
+
+
+def convert(asm, profile=None, runtime=True, stack_top=None, extra_units=()):
+    """Return a single-file listing equivalent to the GNU assembly `asm`.
+
+    With `runtime` the C library unit and the handwritten helper library are
+    inlined. Their local labels get a per-unit prefix and any block nothing
+    references is dropped, which is what the linker would otherwise do through
+    separate object files.
+    """
+    if profile is None:
+        from .core import load_profile
+        profile = load_profile()
+    units = list(extra_units)
+    if runtime:
+        # Each C file is its own unit: codegen numbers local labels from 1, so two
+        # files merged first and relabelled later would collide.
+        units = _io_unit(profile) + units
     body = asm
+    for index, unit in enumerate(units, start=1):
+        body += '\n' + _drop_unreferenced(_relabel(unit, f'u{index}_'), external=body)
     if runtime and RUNTIME.exists():
-        body += '\n' + RUNTIME.read_text(encoding='utf-8')
+        body += '\n' + _drop_unreferenced(RUNTIME.read_text(encoding='utf-8'), external=body)
     # Keep the visible entry name for RARS while the compiled main keeps its body.
     body = re.sub(r'(?m)^\.globl\s+main\b', '.globl __mycc_main', body)
     body = re.sub(r'(?m)^main:', '__mycc_main:', body)
@@ -207,18 +279,17 @@ def convert(asm, profile=None, runtime=True, stack_top=None, hardware_io=False):
     defined = set(LABEL.findall(text))
     used = set(CALL.findall(text))
     out = _entry(stack_top, profile) + '\n' + text
-    table = HARDWARE_SHIMS if hardware_io else SHIMS
-    shims = [_shim(name, number) for name, number in table.items()
+    shims = [_shim(name, number) for name, number in SHIMS.items()
              if name in used and name not in defined]
     if shims:
         out += '\n# --- RARS syscall shims ---\n' + '\n\n'.join(shims) + '\n'
     return out
 
 
-def images(asm, profile=None, runtime=True, stack_top=None, hardware_io=True):
+def images(asm, profile=None, runtime=True, stack_top=None, extra_units=()):
     """Return (listing, rom_words, ram_words): a Logisim ROM/RAM image pair."""
     text = convert(asm, profile=profile, runtime=runtime, stack_top=stack_top,
-                   hardware_io=hardware_io)
+                   extra_units=extra_units)
     rom_words, ram_words, _ = assemble(text)
     return text, rom_words, ram_words
 

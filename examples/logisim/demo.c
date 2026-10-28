@@ -9,23 +9,48 @@
  *   build/demo/demo.rom.hex  载入 Logisim 的 ROM（指令）
  *   build/demo/demo.ram.hex  载入 Logisim 的 RAM（全局数组初值）
  *
- * 交互：a7=34 的 ecall 只把 a0 显示成十六进制就继续，a7≠34 才停机等 go。
- *      所以这个版本会把 7 个值连续显示完，最后停在结尾的 a7=10 处。
- *      想让每个值都停住等 go（课堂演示更好用），用同目录的 demo_pause.c，
- *      它的区别只是每个 printhex 后面多了一行 exit(0)。
+ * 输出走标准 RISC-V 系统调用：putchar -> a7=11，exit -> a7=10。
+ * 所以这段程序在 TTY 上打出的就是下面这几行文本；丢进 RARS 跑结果一样。
  *
- * 预期检查点（十六进制，依次出现）：
- *   1) 0x00000007  scores[0]，说明 RAM 里的全局数组初值装对了
- *   2) 0x00000021  累加和 7+3+9+1+5+8 = 33，指针遍历 + 循环
- *   3) 0x00000009  最大值，逐元素比较
- *   4) 0x00000042  33*2 = 66，这台 CPU 没有 M 扩展，走软件乘法
- *   5) 0x00000008  33/4 = 8，走软件除法（32 位恢复余数除法）
- *   6) 0x00000084  33<<2 = 132，用到 SLL
- *   7) 0x0000007b  33^0x5A = 123，用到 XOR
- *   最后停在入口存根的 a7=10 处，程序结束。
+ * 预期输出：
+ *   scores[0] = 7          全局数组初值已从 RAM 装对
+ *   sum       = 33         指针遍历 + 循环累加
+ *   max       = 9          逐元素比较
+ *   sum*2     = 66         软件乘法（这台 CPU 没有 M 扩展）
+ *   sum/4     = 8          软件除法
+ *   sum<<2    = 132        SLL
+ *   sum^0x5a  = 123        XOR
  */
 
 int scores[6] = {7, 3, 9, 1, 5, 8};
+
+/* 这个编译器不支持字符串字面量，所以"标签"用 int 数组 + 字符字面量写。
+ * 顺带正好演示全局数组、指针遍历和 *p 取数。 */
+int lbl_scores[10] = {'s', 'c', 'o', 'r', 'e', 's', '[', '0', ']', 0};
+int lbl_sum[4]     = {'s', 'u', 'm', 0};
+int lbl_max[4]     = {'m', 'a', 'x', 0};
+int lbl_mul[6]     = {'s', 'u', 'm', '*', '2', 0};
+int lbl_div[6]     = {'s', 'u', 'm', '/', '4', 0};
+int lbl_shl[7]     = {'s', 'u', 'm', '<', '<', '2', 0};
+int lbl_xor[9]     = {'s', 'u', 'm', '^', '0', 'x', '5', 'a', 0};
+
+/* 打印一个以 0 结尾的 int 数组：没有 print_string 系统调用，用 putchar 循环就够。 */
+void print(int* s) {
+    while (*s != 0) {
+        putchar(*s);
+        s = s + 1;
+    }
+}
+
+/* 打印 "名字 = 值" 这样一行。 */
+void show(int* name, int value) {
+    print(name);
+    putchar(' ');
+    putchar('=');
+    putchar(' ');
+    printint(value);
+    putchar('\n');
+}
 
 /* 用指针遍历：p 与 end 的比较会用到 sltu，加法则逐元素累加。 */
 int total(int* p, int* end) {
@@ -52,12 +77,12 @@ int largest(int* p, int n) {
 int main(void) {
     int sum = total(scores, scores + 6);
 
-    printhex(scores[0]);              /* 1) RAM 初值       */
-    printhex(sum);                    /* 2) 累加和         */
-    printhex(largest(scores, 6));     /* 3) 最大值         */
-    printhex(sum * 2);                /* 4) 软件乘法       */
-    printhex(sum / 4);                /* 5) 软件除法       */
-    printhex(sum << 2);               /* 6) SLL            */
-    printhex(sum ^ 0x5A);             /* 7) XOR            */
+    show(lbl_scores, scores[0]);          /* RAM 初值       */
+    show(lbl_sum, sum);                   /* 累加和         */
+    show(lbl_max, largest(scores, 6));
+    show(lbl_mul, sum * 2);               /* 软件乘法       */
+    show(lbl_div, sum / 4);               /* 软件除法       */
+    show(lbl_shl, sum << 2);              /* SLL            */
+    show(lbl_xor, sum ^ 0x5A);            /* XOR            */
     return 0;
 }

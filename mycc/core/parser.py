@@ -189,6 +189,8 @@ class Parser:
             n = self.expr(); self.take(')')
         elif t.kind == 'num':
             self.take(); n = Node('num', t, value=t.value)
+        elif t.kind == 'str':
+            self.take(); n = Node('str', t, value=t.value)
         else:
             self.take('id'); n = Node('id', t, value=t.text)
         while True:

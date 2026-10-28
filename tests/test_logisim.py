@@ -71,15 +71,16 @@ def test_reduced_profile_never_emits_an_instruction_the_machine_lacks():
     assert 'sltu' in core.load_profile('logisim').instructions
 
 
-def test_runtime_is_lowered_only_once_so_helper_labels_stay_unique():
-    """Withholding `sb` forces the runtime through the fallback path."""
+def test_runtime_obeys_a_profile_that_withholds_a_store():
+    """The handwritten runtime is lowered against the selected ISA, not copied raw."""
     source = 'int main(void){ printint(17/5); return 0; }'
     result = core.compile(core.SourceFile(source, 't.c'), core.load_profile('logisim'))
-    listing = convert(result.asm, profile=core.load_profile('PF-01', disable=['sb']))
-    labels = re.findall(r'(?m)^([A-Za-z_.$][\w.$]*):', listing)
-    duplicates = {name for name in labels if labels.count(name) > 1}
-    assert not duplicates, f'labels defined more than once: {sorted(duplicates)}'
-    assert '__mv_sb' in labels, 'the withheld store should pull in its helper'
+    profile = core.load_profile('PF-01', disable=['sb'])
+    listing = convert(result.asm, profile=profile)
+    emitted = {text.split()[0] for section, text in sections(listing)
+               if section == 'text' and not text.startswith('.') and not text.endswith(':')}
+    outside = emitted - profile.instructions - {'ecall'}
+    assert not outside, f'listing kept instructions the profile withholds: {sorted(outside)}'
 
 
 def test_global_addresses_use_bounded_relocations_not_a_rom_literal():
@@ -158,26 +159,45 @@ def test_images_returns_a_rom_pair_for_a_program_with_globals(tmp_path):
     assert 'addi sp,zero,1024' in listing
 
 
-def test_hardware_images_turn_outputs_into_display_checkpoints():
-    """Every ecall pauses for `go`; a7=34 also shows a0. Characters just have no display."""
-    source = 'int main(void){ printint(7); putchar(65); printhex(255); return 0; }'
-    listing = convert(compile_target(source).asm, profile=core.load_profile('logisim'),
-                      hardware_io=True)
-    body = listing.split('# --- RARS syscall shims ---')[-1]
-    putchar = body.split('putchar:')[1].split('.globl')[0]
-    printint = body.split('printint:')[1].split('.globl')[0]
-    printhex = body.split('printhex:')[1]
-    assert 'ecall' not in putchar, 'a pause per separator char would bury the checkpoints'
-    assert 'addi a7,zero,34' in printint and 'ecall' in printint
-    assert 'addi a7,zero,34' in printhex and 'ecall' in printhex
+def test_platform_abi_is_the_standard_syscall_convention():
+    """a7 selects the service, a0 carries the argument: the same in every port.
+
+    Only putchar/getchar/exit are platform primitives. printint and printhex are
+    ordinary C in runtime/io.c, so they must appear as real functions rather than
+    as ecall shims.
+    """
+    source = 'int main(void){ int c; putchar(65); printint(7); printhex(255); c = getchar(); return c; }'
+    listing = convert(compile_target(source).asm, profile=core.load_profile('logisim'))
+    shims = listing.split('# --- RARS syscall shims ---')[-1]
+    assert 'addi a7,zero,11' in shims.split('putchar:')[1].split('.globl')[0]
+    assert 'addi a7,zero,12' in shims.split('getchar:')[1]
+    assert 'printint:' not in shims and 'printhex:' not in shims, 'these live in io.c'
+    assert re.search(r'(?m)^printint:', listing)
+    assert re.search(r'(?m)^printhex:', listing)
 
 
-def test_simulator_listing_keeps_real_syscalls_for_rars():
-    source = 'int main(void){ printint(7); return 0; }'
-    listing = convert(compile_target(source).asm, profile=core.load_profile('logisim'),
-                      hardware_io=False)
-    body = listing.split('# --- RARS syscall shims ---')[-1]
-    assert 'addi a7,zero,1' in body
+def test_merged_listing_defines_every_label_once():
+    """Codegen numbers local labels per unit, so merging units can collide."""
+    for text in ('int main(void){ return 17/5; }',
+                 'int shr(int a,int n){ return a >> n; }\nint main(void){ return shr(64,2); }'):
+        listing = convert(compile_text(text).asm, profile=core.load_profile('logisim'))
+        labels = re.findall(r'(?m)^([A-Za-z_.$][\w.$]*):', listing)
+        duplicates = {name for name in labels if labels.count(name) > 1}
+        assert not duplicates, f'labels defined more than once: {sorted(duplicates)}'
+
+
+def test_unused_runtime_helpers_are_dropped_but_shared_ones_survive():
+    """Section GC keeps the image inside the 1024-word ROM."""
+    from mycc.rars import _drop_unreferenced, RUNTIME
+    runtime = RUNTIME.read_text(encoding='utf-8')
+    names = lambda text: re.findall(r'(?m)^\.globl\s+(\S+)', text)
+    nothing = _drop_unreferenced(runtime, external='jal ra,putchar')
+    assert names(nothing) == [], 'a program that only prints needs no arithmetic helper'
+    divided = _drop_unreferenced(runtime, external='jal ra,__divsi3 jal ra,__modsi3')
+    assert '__divsi3' in names(divided) and '__modsi3' in names(divided)
+    assert not ({'memcpy', 'memset'} & set(names(divided)))
+    # `.Lsigned_div` lives inside another block; dropping it would dangle a jump.
+    assert '.Lsigned_div:' in divided
 
 
 def test_logisim_target_rejects_a_profile_the_cpu_cannot_decode():
@@ -219,11 +239,12 @@ def test_logisim_target_compiles_with_bounded_data_addresses():
 
 
 def test_classroom_demo_program_builds_a_loadable_pair():
-    """The shipped demo must fit the kit and expose one checkpoint per printhex."""
+    """The shipped demo must fit the kit and print one labelled line per checkpoint."""
     source = ROOT / 'examples' / 'logisim' / 'demo.c'
     result = compile_target(source.read_text(encoding='utf-8'))
     assert result.success
     listing, rom, ram = images(result.asm, profile=core.load_profile('logisim'), stack_top=1024)
-    assert listing.count('jal ra,printhex') == 7, 'the demo should expose seven checkpoints'
+    assert listing.count('jal ra,show') == 7, 'the demo should print seven labelled lines'
+    assert 'jal ra,putchar' in listing, 'text output goes through the standard syscall'
     assert 0 < len(rom) <= 1024
     assert len(ram) * 4 <= 1024

@@ -33,6 +33,16 @@ CANDIDATES = [
 PROFILES = {'logisim': ('logisim', 'logisim'), 'pf01': ('PF-01', 'generic'),
             'no-lui-vshift': ('PF-01', 'generic')}
 
+# RARS 1.5 builds a fresh InputStreamReader on every ReadChar, so the first call
+# drains a redirected stream and the second one sees EOF. Console-fed programs are
+# therefore fed from an array instead, which keeps `readint`/`readchar` and the
+# scanf lowering under test. The seed text comes from `<name>.in` beside the source.
+CONSOLE_SHIM = re.compile(r'getchar:\naddi a7,zero,12\necall\njalr zero,0\(ra\)')
+ARRAY_SHIM = ('getchar:\n    la t0, __probe_input\n    la t1, __probe_index\n'
+              '    lw t2, 0(t1)\n    add t0, t0, t2\n    lbu a0, 0(t0)\n'
+              '    addi t2, t2, 1\n    sw t2, 0(t1)\n    jalr zero, 0(ra)')
+TIMEOUT = 300
+
 
 def build(source, profile_name, target, disable=()):
     """Compile with the same policy the shipped listing uses.
@@ -62,7 +72,8 @@ def rars_dump(jar, listing, out):
     result = subprocess.run(
         ['java', '-jar', str(jar), 'mc', 'CompactDataAtZero', 'a',
          'dump', '.text', 'HexText', str(out), str(listing)],
-        capture_output=True, text=True, encoding='utf-8', errors='replace')
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        stdin=subprocess.DEVNULL, timeout=TIMEOUT)
     if not out.exists():
         return None, (result.stdout + result.stderr).strip()[-500:]
     words = [int(line.strip(), 16) for line in out.read_text().splitlines()
@@ -93,6 +104,22 @@ def check_encoding(jar, sources, scratch):
     return failures
 
 
+def seed(source):
+    """Text the program should read, or None when it needs a console we cannot give."""
+    text = source.with_suffix('.in')
+    return text.read_text(encoding='utf-8') if text.is_file() else None
+
+
+def feed_console(listing, text):
+    """Swap the getchar shim for one that walks a seeded array."""
+    if not CONSOLE_SHIM.search(listing):
+        return None
+    escaped = (text.replace('\\', '\\\\').replace('\n', '\\n')
+                   .replace('\t', '\\t').replace('"', '\\"'))
+    return (CONSOLE_SHIM.sub(ARRAY_SHIM, listing, count=1)
+            + f'\n.data\n__probe_input:\n.asciz "{escaped}"\n__probe_index:\n.word 0\n')
+
+
 def check_behaviour(jar, sources, scratch):
     failures = []
     for source in sources:
@@ -105,11 +132,22 @@ def check_behaviour(jar, sources, scratch):
                 break
             stack = 1024 if profile_name == 'logisim' else None
             listing = scratch / f'{source.stem}.{label}.run.asm'
-            listing.write_text(convert(result.asm, profile=core.load_profile(profile_name),
-                                       stack_top=stack), encoding='utf-8')
-            run = subprocess.run(['java', '-jar', str(jar), 'mc', 'CompactDataAtZero', 'nc', 'me',
-                                  str(listing)], capture_output=True, text=True,
-                                 encoding='utf-8', errors='replace')
+            text = convert(result.asm, profile=core.load_profile(profile_name), stack_top=stack)
+            if 'jal ra,getchar' in text:
+                data = seed(source)
+                if data is None:
+                    failures.append(f'{source.name}: reads the console but has no {source.stem}.in seed')
+                    break
+                text = feed_console(text, data)
+            listing.write_text(text, encoding='utf-8')
+            try:
+                run = subprocess.run(
+                    ['java', '-jar', str(jar), 'mc', 'CompactDataAtZero', 'nc', 'me', str(listing)],
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                    stdin=subprocess.DEVNULL, timeout=TIMEOUT)
+            except subprocess.TimeoutExpired:
+                failures.append(f'{source.name} [{label}]: RARS did not finish within {TIMEOUT}s')
+                break
             outputs[label] = (run.returncode, (run.stdout or '').strip())
         if len(outputs) == 2 and outputs['logislim'] != outputs['baseline']:
             failures.append(f'{source.name}: output differs between the 22-instruction build and PF-01')

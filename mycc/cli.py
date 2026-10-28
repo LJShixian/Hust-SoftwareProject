@@ -11,6 +11,8 @@ from . import __version__
 from . import core
 from .rars import convert as to_rars
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class ArgumentParser(argparse.ArgumentParser):
     def error(self,message):
@@ -141,7 +143,7 @@ def run(argv=None):
         except OSError as exc:
             print(f'mycc: error: cannot create output directory for {args.o}: {exc}',file=sys.stderr); return 70
         try:
-            text,rom,ram = images(result.asm,profile=profile,stack_top=stack_top,hardware_io=True)
+            text,rom,ram = images(result.asm,profile=profile,stack_top=stack_top)
         except (ValueError,AssembleError) as exc:
             print(f'mycc: error: cannot build a Logisim image: {exc}',file=sys.stderr); return 70
         try:

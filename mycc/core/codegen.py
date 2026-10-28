@@ -160,6 +160,31 @@ class Generator:
             self.emit('add a0,t0,a0')
         else: self.expression(n.children[0])
 
+    def string_address(self,label,rd='a0'):
+        """Address of one string literal, using whatever the profile can do."""
+        self.mark('ADDRESS',label)
+        if self.profile.has('lui'):
+            self.emit(f'lui {rd},%hi({label})',f'addi {rd},{rd},%lo({label})')
+        elif self.policy.data_address_bits:
+            shift=32-self.policy.data_address_bits
+            self.emit(f'addi {rd},zero,%lo({label})',f'slli {rd},{rd},{shift}',f'srli {rd},{rd},{shift}')
+        else:
+            pc,done=self.label('pc'),self.label('addr')
+            self.emit(f'jal {rd},{pc}',pc+':',f'lw {rd},8({rd})',f'jal zero,{done}',f'.word {label}',done+':')
+
+    def format_call(self,n):
+        """Emit direct helper calls for a pre-analysed `printf`/`scanf`.
+
+        The conversions are consumed left to right, which is one of the orders C
+        allows for argument evaluation, so no argument ever has to be spilled.
+        """
+        self.mark('FORMAT',n.symbol.name)
+        for kind,payload in n.plan:
+            if kind=='text':
+                self.string_address(payload); self.emit('jal ra,printstr')
+            else:
+                self.expression(payload); self.emit(f'jal ra,{kind}')
+
     def binary(self,op,left=INT,right=INT):
         # left in t0, right in a0. Use t1/t2 only as expression-local scratch.
         self.mark('BIN_'+op)
@@ -184,9 +209,12 @@ class Generator:
         self.node=n
         k=n.kind
         if k in ('num','sizeof'): self.const(n.value)
+        elif k=='str': self.string_address(n.label)
         elif k in ('id','index') or (k=='unary' and n.value=='*'):
             self.lvalue(n)
             if n.type.kind!='array': self.emit('lw a0,0(a0)')
+        elif k=='call' and getattr(n,'plan',None) is not None:
+            self.format_call(n)
         elif k=='call':
             self.mark('CALL',n.symbol.name)
             for arg in n.children[1:]: self.expression(arg); self.push()
@@ -278,6 +306,12 @@ class Generator:
             for value in values: self.emit(f'.word {value}')
             remainder=n.type.size-4*len(values)
             if remainder: self.emit(f'.zero {remainder}')
+        for label,codes in getattr(prog,'strings',()):
+            # Literals live in .data, not a read-only segment: on the Harvard
+            # classroom kit `lw` can only reach RAM.
+            words=codes+[0]
+            words+=[0]*((-len(words))%4)
+            self.emit('.section .data','.balign 4',f'{label}:','.word '+','.join(map(str,words)))
         self.emit('.section .text')
         if self.policy.initializer and not self.library:
             self.emit(f'.globl {self.policy.initializer}',self.policy.initializer+':')

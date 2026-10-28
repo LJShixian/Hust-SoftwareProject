@@ -63,7 +63,7 @@ def test_missing_required_before_lexing():
     ('int main(){char x;return 0;}','E-UNSUPPORTED-CONSTRUCT'),
     ('int main(){return (int)3;}','E-UNSUPPORTED-CONSTRUCT'),
     ('int main(){return 1?2:3;}','E-UNSUPPORTED-CONSTRUCT'),
-    ('int main(){return "text";}','E-UNSUPPORTED-CONSTRUCT'),
+    ('int main(){return "text";}','E-SEMA-TYPE'),
     ('/* never closed','E-LEX-UNCLOSED-COMMENT'),
     ('int main(){return @;}','E-LEX-UNEXPECTED-CHAR'),
     ('int main(){return 09;}','E-LEX-INVALID-INTEGER'),
