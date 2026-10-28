@@ -1,6 +1,6 @@
 ﻿# mycc — 可配置指令集的 C 子集编译器
 
-> **本分支为 `zjb`**：在 `main` 第一版 `8a5d050` 基础上修正后的 mycc 参考实现。改动与验证数据见 [本分支改动说明](#本分支改动说明)。
+> **本分支为 `zjb`**：在 `main` 第一版 `8a5d050` 基础上继续改进的 mycc 参考实现，包含两轮工作：一是把实现对齐到需求/设计文档，二是接入硬件综合训练的 Logisim 课堂 CPU。改动与验证数据见 [本分支改动说明](#本分支改动说明)。
 
 mycc 0.3.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，生成 **GNU RISC-V 汇编、源码诊断和指令选择说明**。可在命令行使用，也可在 PySide6 工作台中编辑、编译和查看结果。
 
@@ -10,34 +10,47 @@ mycc 0.3.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，�
 
 ## 本分支改动说明
 
-`main` 的 `8a5d050` 是第一版实现。本分支在其上 **修改 14 个文件、新增 2 个文件、删除 0 个文件**，目标是把实现对齐到需求与设计文档的要求。改动按主题分组：
+`main` 的 `8a5d050` 是第一版实现。本分支在其上累计**修改 17 个文件、新增 11 个文件、删除 0 个文件**，分两轮：
+
+### 轮次一：对齐需求与设计文档
 
 | 主题 | 位置 | 内容 |
 |---|---|---|
-| 指令选择可追溯 | `mycc/core/codegen.py`、`driver.py` | 新增 `LoweringRecord`，每条降级记录 `op`、源位置 `file:line:col`、选中理由、被拒方案（含缺失指令）、指令数增量 `delta`；`--dump-lowering-report` 输出 `位置` 与 `Δ指令` 两列 |
-| 诊断质量 | `mycc/core/parser.py` | 文件作用域出现语句时报 `E-PARSE-FILE-SCOPE`，并给出“放进函数体内”的修复建议，不再只说 `expected 'int' or 'void'` |
-| 诊断质量 | `mycc/core/sema.py` | 新增 `W-SEMA-INFINITE-RECURSION`：所有路径都再次调用自身的函数会被警告（只警告，不阻断代码生成） |
-| RARS 后端 | `mycc/rars.py`（新增）、`mycc/cli.py` | 新增 `--rars`，输出单个自包含 `.asm`：重写 `.section/.balign/.zero/.type/.size/.option` 等 RARS 不认的伪指令，重命名 `main` 并注入 `ecall` 退出，只追加程序真正用到的运行时 shim |
-| 文档一致性门禁 | `tools/check_docs.py`（新增）、`tools/check.py` | 校验 README 预设表、`configs/isa/presets/*.json` 与 `mycc/core/isa.py` 三者一致，并检查每个预设都满足 MV-ISA 下限；`check.py` 另生成 `build/reports/source-hashes.json` |
-| 工作台 | `mycc/gui/views.py`、`workbench.py` | 移除与菜单重复的工具栏；`导出当前页` 按当前标签页决定格式；菜单项/标签页/ISA 复选框悬停即在状态栏解释；`取消` 仅编译中可用 |
-| 能力配置修复 | `mycc/gui/workbench.py` | `normalize_capabilities`：只保存相对预设的差异，修正取消勾选后 PF-01 被持久化成 22 条指令的问题 |
-| 回归工具健壮性 | `tools/verify_cpu21.py` | 源码哈希改为 UTF-8 解码 + 无 `rg` 时回退遍历（原实现在中文文件名上崩）；新增 ASCII 暂存目录，绕开 Vivado `-testplusarg` 无法承载非 ASCII 路径的限制 |
-| 边界检查 | `tools/check_architecture.py` | 导入白名单加入 `rars` |
-| 测试 | `tests/test_compiler.py`、`test_workbench.py` | 新增 8 组用例：文件作用域诊断、无穷递归（含 4 个不应误报的终止递归）、RARS 伪指令与 shim 裁剪、构建可重现性、能力指纹、降级报告位置与代价、能力差异相对预设 |
-| 文档 | `README.md`、`docs/guides/scope.md` | 更新工作台、语义分析、RARS 相关描述与实测数字 |
+| 指令选择可追溯 | `mycc/core/codegen.py`、`driver.py` | `LoweringRecord`：每条降级记录源位置 `file:line:col`、选中理由、被拒方案（含缺失指令）、指令数增量；`--dump-lowering-report` 增加位置与 `Δ指令` 两列 |
+| 诊断质量 | `mycc/core/parser.py` | 文件作用域出现语句时报 `E-PARSE-FILE-SCOPE` 并给出修复建议 |
+| 诊断质量 | `mycc/core/sema.py` | 新增 `W-SEMA-INFINITE-RECURSION`，只警告不阻断生成 |
+| RARS 后端 | `mycc/rars.py`、`mycc/cli.py` | `--rars` 输出 RARS 可直接汇编运行的单文件 `.asm` |
+| 文档一致性门禁 | `tools/check_docs.py`、`tools/check.py` | README 预设表、`configs/isa/presets` 与 `core/isa.py` 三方对齐；另生成源码哈希 |
+| 工作台 | `mycc/gui/views.py`、`workbench.py` | 去掉与菜单重复的工具栏；导出按当前页决定格式；悬停即在状态栏解释；修正能力配置被持久化成错误指令数的问题 |
+| 回归工具健壮性 | `tools/verify_cpu21.py` | 源码哈希按 UTF-8 读取；新增 ASCII 暂存目录，绕开 Vivado `-testplusarg` 无法承载非 ASCII 路径的限制 |
 
-### 验证结果（2026-10-26 实测）
+### 轮次二：硬件综合训练 Logisim 课堂 CPU
+
+目标：**现场写一段 C，一条命令拿到可载入 Logisim ROM/RAM 的镜像**，不依赖 Java、RARS 或 GNU 工具链。
+
+| 主题 | 位置 | 内容 |
+|---|---|---|
+| 新目标与预设 | `adapters/logisim/`、`mycc/core/isa.py`、`configs/isa/presets/PF-08.json` | `--target logisim` 与预设 `PF-08`：按课程设计报告表 1.1 建模 24 条可编码指令（硬件译码 31 条），1024 字 ROM / 1024 字节 RAM，无链接器 |
+| 内置汇编器 | `mycc/encode.py`（新增） | 把自产的单文件汇编直接编码成机器码：R/I/S/B/U/J 型、`%hi/%lo`、`.text/.data/.align/.word/.space`；与真 RARS 逐字比对通过 |
+| 镜像导出 | `mycc/cli.py`、`mycc/rars.py` | `--logisim` 输出 `v2.0 raw` 的 `.rom.hex` 与（有初值全局变量时）`.ram.hex`；入口存根装载 `sp`（默认 1024），全局变量改用有界 `%lo` 重定位（Harvard 上 `lw` 读不到 ROM） |
+| 缺陷修复 | `mycc/rars.py`、`tools/build.py` | ① `--rars` 原先不对 `runtime.s` 做降级，受限指令集下会漏出 `sltu`；② `switch` 的 `.word` 跳转表落在 `.text` 里，RARS 直接拒绝、硬件也读不到；③ `.logisim.hex` 原先逐字节写出，字宽 ROM 会跑飞 |
+| 预检工具 | `tools/check_logisim.py`（新增） | 零依赖：把镜像反汇编回来检查指令是否都在该 CPU 的译码范围内、容量是否超限 |
+| 交叉校验 | `tools/check_rars.py`（新增） | 与真 RARS 逐字对照汇编结果，并对同一程序做行为差分；缺 Java 时自动跳过 |
+| 课堂演示 | `examples/logisim/demo.c`、`demo_pause.c`（新增） | 7 个 `printhex` 检查点：全局数组初值 → 指针遍历累加 → 最大值 → 软件乘 → 软件除 → SLL → XOR |
+
+### 验证结果（2026-10-28）
 
 | 项目 | 结果 |
 |---|---|
-| `\check.cmd` | `131 passed, 1 skipped`，退出码 0 |
-| 覆盖率 | 语句 92%，门槛通过 |
+| `\check.cmd` | `154 passed, 1 skipped`，退出码 0 |
+| 覆盖率 | 语句 91%，门槛通过 |
 | 架构与文档门禁 | `architecture: ok`、`docs: preset table and JSON reference sets agree with core/isa.py` |
-| CPU21 真实 RTL 回归 | **18/18 通过**，81.8 s，每例校验 600 个 VGA 打包字 |
-| 只读保证 | 外部 FPGA 工程 84 个文件 SHA-256 前后一致，0 变更 |
-| RARS 1.5 | 8 个示例全部汇编通过（0 错误 0 警告）且运行结果正确 |
+| Logisim 镜像预检 | 10 个程序 0 问题（ROM 166~491 字 / 上限 1024；RAM ≤ 6 字 / 上限 256） |
+| 编码器 vs 真 RARS | 9 程序 × 3 指令集 = 27/27 逐字一致 |
+| 行为差分 | 同程序按 24 条指令集与 PF-01 编译，RARS 输出 9/9 相同 |
+| CPU21 真实 RTL 回归 | 18/18 通过，外部 FPGA 工程 84 个文件只读未变更 |
 
-未验证项：本机无 `qemu-riscv32`，执行与 GCC 对照仍未跑；CPU21 只做了 xsim 行为级仿真，**没有物理上板证据**，不覆盖时序收敛与板级电平。
+未验证项：本机无 `qemu-riscv32`，执行与 GCC 对照未跑；Logisim 侧目前是行为级验证（指令集、寻址、容量），未覆盖时序与板级电平。
 
 ## 快速使用
 
@@ -81,7 +94,8 @@ SoftwareEngineering/
 ├─ launch.cmd / check.cmd          Windows GUI / 检查快捷入口
 ├─ mycc/                           编译器软件
 │  ├─ __main__.py / cli.py         模块入口、参数解析和文件读写
-│  ├─ rars.py                      RARS 1.5 单文件 .asm 导出
+│  ├─ rars.py                      RARS 单文件导出、镜像 I/O 映射
+│  ├─ encode.py                    内置汇编器：单文件汇编 → 机器码 → 镜像
 │  ├─ core/                       标准库实现的七模块编译内核
 │  │  ├─ types.py                 类型、AST、诊断、选项及结果结构
 │  │  ├─ lexer.py                 C 文本 → Token
@@ -99,18 +113,22 @@ SoftwareEngineering/
 │  └─ io.c                        printint / printhex 格式化输出
 ├─ adapters/                       可选外部运行环境
 │  ├─ cpu21/                      策略、ISA/MMIO、启动、VGA、链接、ROM 导出
+│  ├─ logisim/                    课堂 CPU：译码 31 条、建模 24 条、有界 RAM 地址、无链接器
 │  ├─ generic/                    通用裸机样例及占位 MMIO 配置
 │  └─ qemu/                       Linux-user QEMU 启动和链接资产
 ├─ examples/
 │  ├─ compiler/                   演示、函数、数组、控制流、指针和运算示例
-│  └─ cpu21/                      VGA、滚屏、栈保护及板卡自检示例
+│  ├─ cpu21/                      VGA、滚屏、栈保护及板卡自检示例
+│  └─ logisim/                    课堂演示：7 个显示检查点，含逐值停顿版
 ├─ configs/isa/
-│  ├─ presets/                    PF-01 至 PF-07 的 JSON 参考配置
+│  ├─ presets/                    PF-01 至 PF-08 的 JSON 参考配置
 │  └─ examples/board_v2.json       自定义 ISA 文件示例
 ├─ tools/                          python -m tools.* 开发工具
 │  ├─ build.py                    GNU 汇编/链接及固件导出
 │  ├─ check.py                    测试、覆盖率与可选外部验证
 │  ├─ check_docs.py                README 预设表、JSON 参考集与 isa.py 一致性
+│  ├─ check_logisim.py             镜像预检：指令集合规与 ROM/RAM 容量
+│  ├─ check_rars.py                与 RARS 逐字对照汇编结果并对比运行输出
 │  ├─ verify_cpu21.py             只读加载原始 RTL，运行固件回归
 │  ├─ compare.py                  QEMU 中对照 mycc 与 GCC 行为
 │  ├─ check_architecture.py       模块依赖边界检查
@@ -231,6 +249,7 @@ GUI 的所有命令集中在菜单栏，不再重复提供工具栏按钮。Ctrl
 | PF-05 / i+m | 29 | 硬件有符号乘除法 |
 | PF-06 / byteload | 30 | 字节加载能力，不开放 char 类型 |
 | PF-07 / all | 39 | 本编译器指令范围上限 |
+| PF-08 / logisim | 24 | 硬件综合训练 Logisim CPU（设计报告表 1.1 的 28 条中可编码的 24 条） |
 | cpu21 | 32 | CPU21 编译器相关参考集合 |
 
 常用组：`mul`、`divrem`、`m`、`xor`、`cmpbr`、`byteload`、`auipc`、`lui`、`vshift`。
@@ -254,12 +273,19 @@ CLI 退出码：`0` 成功，`1` 编译失败，`2` 内部错误，`64` 参数/I
 | 环境 | 所需工具 | 提供内容和边界 |
 |---|---|---|
 | [CPU21](adapters/cpu21/README.md) | RISC-V GNU 工具；RTL 回归另需 Vivado xvlog/xelab/xsim 和原 RTL | Harvard 启动、VGA、栈保护、MMIO 校验、ROM 导出；尚无物理上板证据 |
+| [Logisim 课堂 CPU](adapters/logisim/README.md) | **无**（自带汇编器与镜像编码器） | 译码 31 条（设计报告表 1.1）、1024 字 ROM / 1024 字节 RAM、无链接器；直接输出 ROM/RAM 镜像 |
 | [generic 裸机](adapters/generic/README.md) | RISC-V GNU 工具 | 统一可读代码/数据空间、占位外设的集成样例，使用前须核对硬件 |
 | [QEMU](adapters/qemu/README.md) | RISC-V GNU 工具、qemu-riscv32；对照另需 GCC | Linux-user 启动和系统调用，不表示 FPGA 支持这些调用 |
 
 ```powershell
 # RARS：单文件、可直接汇编并运行（仿真用，不含板卡地址）
 python -m mycc examples/compiler/muldiv.c --rars -o build/muldiv.asm
+
+# 硬件综合训练 Logisim CPU：一条命令出汇编 + ROM/RAM 镜像，不需要 Java 或 GNU 工具
+python -m mycc examples/compiler/muldiv.c --target logisim -o build/demo/muldiv.asm
+#   build/demo/muldiv.asm      可直接在 RARS（compact，data at 0）里跑
+#   build/demo/muldiv.rom.hex  拖进 Logisim 的 ROM（上限 1024 字，现有示例 166~491 字）
+#   build/demo/muldiv.ram.hex  程序有初值全局变量时才生成，拖进 RAM
 
 # CPU21 完整固件：编译时选择地址配置
 python -m tools.build examples/compiler/compiler_demo.c --target cpu21 --board-file adapters/cpu21/board.json -o build/cpu21-demo
@@ -273,6 +299,10 @@ python -m tools.compare examples/compiler/compiler_demo.c
 .\check.cmd
 .\check.cmd --cpu21 --fpga-root D:\Xilinx\Project\risc-v
 .\check.cmd --full
+
+# 课堂演示前的两项确认（check_rars 需要 Java，缺少时自动跳过）
+python -m tools.check_logisim
+python -m tools.check_rars
 
 # 对比编译器相关指令集合
 python -m tools.check_isa_consistency adapters/cpu21/hw_caps.json --profile cpu21

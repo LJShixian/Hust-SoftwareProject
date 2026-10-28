@@ -47,6 +47,11 @@ def main():
     if drift:
         print('\n'.join(drift)); return 1
     print('docs: preset table and JSON reference sets agree with core/isa.py',flush=True)
+    from .check_logisim import check as logisim_check
+    bad=logisim_check(quiet=True)
+    if bad:
+        print('\n'.join(bad)); return 1
+        print('logisim: images honour the course ISA and fit the 1024-word ROM / 1024-byte RAM',flush=True)
     if args.full:
         try: tool('as'); tool('gcc')
         except RuntimeError as exc: print(exc); return 1

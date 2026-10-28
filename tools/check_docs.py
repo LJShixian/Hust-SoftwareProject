@@ -33,7 +33,7 @@ def check():
     counts = readme_counts()
     if not counts:
         errors.append('README: preset table not found; the drift check would be vacuous')
-    expected = {f'PF-{i:02}': len(PRESETS[ALIASES[f"PF-{i:02}"]]) for i in range(1, 8)}
+    expected = {f'PF-{i:02}': len(PRESETS[ALIASES[f"PF-{i:02}"]]) for i in range(1, 9)}
     expected['cpu21'] = len(PRESETS['cpu21'])
     for name, count in sorted(expected.items()):
         if name not in counts:

@@ -1,0 +1,31 @@
+{
+  "name": "reference_logisim",
+  "description": "PF-08 hardware-course Logisim CPU; built-in source of truth is core/isa.py",
+  "schema_version": 1,
+  "instructions": [
+    "add",
+    "addi",
+    "and",
+    "andi",
+    "beq",
+    "bltu",
+    "bne",
+    "jal",
+    "jalr",
+    "lw",
+    "or",
+    "ori",
+    "sb",
+    "sll",
+    "slli",
+    "slt",
+    "slti",
+    "sltu",
+    "srai",
+    "srli",
+    "sub",
+    "sw",
+    "xor",
+    "xori"
+  ]
+}

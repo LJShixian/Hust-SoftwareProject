@@ -92,7 +92,12 @@ def build(source,profile=None,qemu=False,output=None,board=None,target='generic'
         export_rom(blob,out)
     else:
         atomic_write(out.with_suffix('.hex'),out.with_suffix('.bytes.hex').read_text())
-        atomic_write(out.with_suffix('.logisim.hex'),'v2.0 raw\n'+' '.join(f'{b:02x}' for b in blob)+'\n')
+        # Logisim's `v2.0 raw` writes one memory *word* per token, so a 32-bit ROM
+        # needs 8 hex digits per line. Emitting bytes produced an image that loaded
+        # without error and then ran garbage, which is the worst failure mode.
+        padded=blob+b'\0'*((-len(blob))%4)
+        words=[int.from_bytes(padded[i:i+4],'little') for i in range(0,len(padded),4)]
+        atomic_write(out.with_suffix('.logisim.hex'),'v2.0 raw\n'+''.join(f'{word:08x}\n' for word in words))
     from .lint import lint
     violations=lint(elf,profile,qemu=qemu,target=target)
     if violations: raise RuntimeError('\n'.join(violations))

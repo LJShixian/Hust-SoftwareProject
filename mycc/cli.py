@@ -24,9 +24,13 @@ def parser():
     p.add_argument('-o',default='a.s')
     p.add_argument('--version',action='version',version=f'mycc {__version__} | Python {sys.version_info.major}.{sys.version_info.minor} | ISA schema 1')
     external=p.add_argument_group('可选外部适配（普通编译无需设置）')
-    external.add_argument('--target',choices=['generic','cpu21'],default='generic')
+    external.add_argument('--target',choices=['generic','cpu21','logisim'],default='generic')
     external.add_argument('--rars',action='store_true',
                           help='emit one self-contained .asm for the RARS simulator instead of GNU assembly')
+    external.add_argument('--logisim',action='store_true',
+                          help='with --rars, also emit Logisim v2.0 raw ROM/RAM images next to -o')
+    external.add_argument('--stack-top',type=lambda text:int(text,0),default=None,
+                          help='value loaded into sp by the RARS entry stub (default 1024 with --logisim)')
     p.add_argument('--profile',default=None)
     p.add_argument('--isa-file')
     p.add_argument('--enable',action='append',default=[])
@@ -50,7 +54,7 @@ def profile_from_args(args):
     if args.no_lui: disable.append('lui')
     if args.no_vshift: disable.append('vshift')
     target=getattr(args,'target','generic')
-    profile=core.load_profile(args.profile or ('cpu21' if target=='cpu21' else 'PF-01'),args.enable,disable,data)
+    profile=core.load_profile(args.profile or ('cpu21' if target=='cpu21' else ('logisim' if target=='logisim' else 'PF-01')),args.enable,disable,data)
     if target!='generic':
         from adapters import check_target
         check_target(profile,target)
@@ -87,10 +91,14 @@ def run(argv=None):
         from .gui.app import launch
         return launch(args.source)
     if not args.source and not (args.dump_isa or args.dump_isa_whitelist): p.error('provide one .c source file, --gui, --doctor or --dump-isa')
-    if args.rars and args.target != 'generic':
+    if args.target == 'logisim':
+        # The classroom target is one command: listing plus ROM/RAM images.
+        args.rars = True
+        args.logisim = True
+    if (args.rars or args.logisim) and args.target not in ('generic','logisim'):
         # The RARS file has no board addresses or MMIO; claiming a board target
         # would silently drop the layout the user asked for.
-        print('mycc: error: --rars cannot be combined with --target '+args.target
+        print('mycc: error: --rars/--logisim cannot be combined with --target '+args.target
               +'; RARS output is a single generic listing',file=sys.stderr); return 64
     try: profile=profile_from_args(args)
     except core.ProfileError as exc:
@@ -121,7 +129,34 @@ def run(argv=None):
     if args.stats:
         for stage,ms in result.stages_ms.items(): print(f'{stage}\t{ms:.3f}',file=sys.stderr)
     if not result.success: return 1
-    text=to_rars(result.asm) if args.rars else result.asm
+    if args.logisim:
+        # One C file becomes a loadable ROM/RAM pair: no Java, RARS or GNU toolchain.
+        from .encode import AssembleError
+        from .rars import images, ram_hex, rom_hex
+        stack_top = args.stack_top if args.stack_top is not None else 1024
+        # The image build writes up to three files, so creating the folder beats
+        # failing on a path the user just typed for a classroom demo.
+        try:
+            Path(args.o).absolute().parent.mkdir(parents=True,exist_ok=True)
+        except OSError as exc:
+            print(f'mycc: error: cannot create output directory for {args.o}: {exc}',file=sys.stderr); return 70
+        try:
+            text,rom,ram = images(result.asm,profile=profile,stack_top=stack_top,hardware_io=True)
+        except (ValueError,AssembleError) as exc:
+            print(f'mycc: error: cannot build a Logisim image: {exc}',file=sys.stderr); return 70
+        try:
+            atomic_write(args.o,text)
+            rom_path=Path(args.o).with_suffix('.rom.hex')
+            atomic_write(rom_path,rom_hex(rom))
+            if ram:
+                ram_path=Path(args.o).with_suffix('.ram.hex')
+                atomic_write(ram_path,ram_hex(ram))
+        except OSError as exc:
+            print(f'mycc: error: cannot write Logisim image next to {args.o}: {exc}',file=sys.stderr); return 70
+        print(f'logisim: {rom_path.name} {len(rom)} words; sp={stack_top}'
+              +(f'; {Path(args.o).with_suffix(".ram.hex").name} {len(ram)} words' if ram else '; no initialised data'))
+        return 0
+    text=to_rars(result.asm,profile=profile,stack_top=args.stack_top) if args.rars else result.asm
     try: atomic_write(args.o,text)
     except OSError as exc:
         print(f'mycc: error: cannot write {args.o}: {exc}',file=sys.stderr); return 70
