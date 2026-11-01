@@ -2,7 +2,7 @@
 
 The classroom target has hard limits that a compiler cannot infer from the source:
 a 1024-word instruction ROM, a 1024-byte data RAM, and a decoder that only knows
-23 instructions. This tool rebuilds each example through the Logisim target,
+24 instructions. This tool rebuilds each example through the Logisim target,
 decodes every emitted word itself (no objdump needed), and reports anything that
 would fail on the bench instead of during the demo.
 """
@@ -11,60 +11,12 @@ from pathlib import Path
 import sys
 
 from mycc import core
-from mycc.encode import assemble
+from mycc.encode import assemble, decode, HARDWARE_ONLY
 from mycc.rars import convert
 
 ROOT = Path(__file__).resolve().parents[1]
 ROM_WORDS = 1024
 RAM_BYTES = 1024
-TRAPS = {0x00000073: 'ecall', 0x00100073: 'ebreak', 0x30200073: 'mret', 0x00200073: 'uret'}
-CSR = {1: 'csrrw', 2: 'csrrs', 3: 'csrrc', 5: 'csrrwi', 6: 'csrrsi', 7: 'csrrci'}
-# Instructions the design report lists that mycc never emits.
-HARDWARE_ONLY = {'divu', 'remu', 'csrrw', 'csrrsi', 'csrrci', 'uret'}
-
-R_FUNCT = {(0x00, 0): 'add', (0x20, 0): 'sub', (0x00, 1): 'sll', (0x00, 2): 'slt',
-           (0x00, 3): 'sltu', (0x00, 4): 'xor', (0x00, 5): 'srl', (0x20, 5): 'sra',
-           (0x00, 6): 'or', (0x00, 7): 'and'}
-I_FUNCT = {0: 'addi', 2: 'slti', 3: 'sltiu', 4: 'xori', 6: 'ori', 7: 'andi'}
-LOAD_FUNCT = {0: 'lb', 1: 'lh', 2: 'lw', 4: 'lbu', 5: 'lhu'}
-STORE_FUNCT = {0: 'sb', 1: 'sh', 2: 'sw'}
-BRANCH_FUNCT = {0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu'}
-
-
-def decode(word):
-    """Return the mnemonic a decoder for this ISA would see, or None if unknown."""
-    opcode = word & 0x7F
-    funct3 = (word >> 12) & 0x7
-    funct7 = (word >> 25) & 0x7F
-    if opcode == 0x33:
-        if funct7 == 0x01:
-            return {5: 'divu', 7: 'remu'}.get(funct3)
-        return R_FUNCT.get((funct7, funct3))
-    if opcode == 0x13:
-        if funct3 == 1:
-            return 'slli'
-        if funct3 == 5:
-            return {0x00: 'srli', 0x20: 'srai'}.get(funct7)
-        return I_FUNCT.get(funct3)
-    if opcode == 0x03:
-        return LOAD_FUNCT.get(funct3)
-    if opcode == 0x23:
-        return STORE_FUNCT.get(funct3)
-    if opcode == 0x63:
-        return BRANCH_FUNCT.get(funct3)
-    if opcode == 0x6F:
-        return 'jal'
-    if opcode == 0x67:
-        return 'jalr' if funct3 == 0 else None
-    if opcode == 0x37:
-        return 'lui'
-    if opcode == 0x17:
-        return 'auipc'
-    if opcode == 0x73:
-        if funct3:
-            return CSR.get(funct3)
-        return TRAPS.get(word)
-    return None
 
 
 def check_source(source, out, profile):

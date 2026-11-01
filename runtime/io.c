@@ -35,7 +35,7 @@ void printhex(int n) {
     int digit;
     putchar('0'); putchar('x');
     while (i >= 0) {
-        digit = (n >> (i * 4)) & 15;
+        digit = (n >> (i << 2)) & 15;
         if (digit < 10) putchar('0' + digit);
         else putchar('a' + digit - 10);
         i--;

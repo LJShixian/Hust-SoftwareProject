@@ -8,6 +8,7 @@ conversion becomes, what a mismatched format reports, and that the whole chain
 still produces the right text on a real RISC-V simulator.
 """
 import re
+import os
 import shutil
 import subprocess
 import tempfile
@@ -19,8 +20,7 @@ from mycc import core
 from mycc.rars import convert
 
 ROOT = Path(__file__).resolve().parents[1]
-RARS = Path(r'D:\Desktop\2026秋硬件综合训练课设资料发布包\RISC-V汇编工具与测试用例5.0'
-            r'\RISC-V汇编工具与测试用例5.0\rars_f0c874c.jar')
+RARS = Path(os.environ.get('MYCC_RARS_JAR', ROOT / 'tools' / 'rars.jar'))
 
 
 def compile_source(text, profile='logisim'):

@@ -5,7 +5,7 @@ codegen fallbacks are both easy to get subtly wrong:
 
 * **encoding** — hand the `--rars` listing to the real assembler and compare the
   words it dumps with what `mycc/encode.py` produced;
-* **behaviour** — run the same program built for the 22-instruction Logisim set
+* **behaviour** — run the same program built for the 24-instruction Logisim set
   and for unconstrained PF-01, and require identical output.
 
 RARS is optional; when the jar or a JVM is missing both checks skip with exit 0 so
@@ -31,7 +31,7 @@ CANDIDATES = [
          r'\RISC-V汇编工具与测试用例5.0\rars_f0c874c.jar'),
 ]
 PROFILES = {'logisim': ('logisim', 'logisim'), 'pf01': ('PF-01', 'generic'),
-            'no-lui-vshift': ('PF-01', 'generic')}
+            'no-vshift': ('PF-01', 'generic')}
 
 # RARS 1.5 builds a fresh InputStreamReader on every ReadChar, so the first call
 # drains a redirected stream and the second one sees EOF. Console-fed programs are
@@ -84,15 +84,19 @@ def rars_dump(jar, listing, out):
 def check_encoding(jar, sources, scratch):
     failures = []
     for label, (profile_name, target) in PROFILES.items():
-        disable = ['lui', 'vshift'] if label == 'no-lui-vshift' else []
+        disable = ['vshift'] if label == 'no-vshift' else []
         for source in sources:
             result = build(source, profile_name, target, disable)
             if not result.success:
                 failures.append(f'{source.name}: compile failed for {label}')
                 continue
             listing = scratch / f'{source.stem}.{label}.asm'
-            listing.write_text(convert(result.asm, profile=core.load_profile(profile_name, disable=disable)),
-                               encoding='utf-8')
+            try:
+                listing.write_text(convert(result.asm, profile=core.load_profile(profile_name, disable=disable)),
+                                   encoding='utf-8')
+            except ValueError as exc:
+                failures.append(f'{source.name} [{label}]: {exc}')
+                continue
             ours, _, _ = assemble(listing.read_text(encoding='utf-8'))
             reference, error = rars_dump(jar, listing, scratch / f'{source.stem}.{label}.ref.hex')
             if reference is None:
@@ -124,7 +128,7 @@ def check_behaviour(jar, sources, scratch):
     failures = []
     for source in sources:
         outputs = {}
-        for label, profile_name in (('logislim', 'logisim'), ('baseline', 'PF-01')):
+        for label, profile_name in (('logisim', 'logisim'), ('baseline', 'PF-01')):
             target = 'logisim' if profile_name == 'logisim' else 'generic'
             result = build(source, profile_name, target)
             if not result.success:
@@ -150,7 +154,7 @@ def check_behaviour(jar, sources, scratch):
                 break
             outputs[label] = (run.returncode, (run.stdout or '').strip())
         if len(outputs) == 2 and outputs['logislim'] != outputs['baseline']:
-            failures.append(f'{source.name}: output differs between the 22-instruction build and PF-01')
+            failures.append(f'{source.name}: output differs between the 24-instruction build and PF-01')
     return failures
 
 

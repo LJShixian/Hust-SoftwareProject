@@ -19,7 +19,10 @@ __mulsi3:
     addi a0,t0,0
     jalr zero,0(ra)
 
+.globl __divsi3
 # Shared signed restoring division. Quotient in a0, remainder in a1.
+# It lives inside the __divsi3 section (rather than before it) so a program that
+# uses only multiplication does not pull the division routine into its ROM.
 .Lsigned_div:
     addi t6,a0,0
     beq a1,zero,.Ldiv_zero
@@ -66,7 +69,6 @@ __mulsi3:
     addi a1,t6,0
     jalr zero,0(ra)
 
-.globl __divsi3
 __divsi3:
     jal zero,.Lsigned_div
 .globl __modsi3

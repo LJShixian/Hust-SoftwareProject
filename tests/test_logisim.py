@@ -81,6 +81,9 @@ def test_runtime_obeys_a_profile_that_withholds_a_store():
                if section == 'text' and not text.startswith('.') and not text.endswith(':')}
     outside = emitted - profile.instructions - {'ecall'}
     assert not outside, f'listing kept instructions the profile withholds: {sorted(outside)}'
+    # A reduced profile must also produce an encodable, duplicate-free listing;
+    # this is where the old per-unit helper copy collided with the merged one.
+    assemble(listing)
 
 
 def test_global_addresses_use_bounded_relocations_not_a_rom_literal():
@@ -113,10 +116,10 @@ def test_data_directives_leave_the_text_segment():
     """A switch jump table is emitted inline in .text, which RARS rejects."""
     source = '''
 int calls;
-int tick(int n){ calls = calls + 1; return n > 2 ? n - 1 : n + 1; }
+int tick(int n){ calls = calls + 1; if (n > 2) return n - 1; return n + 1; }
 int main(void){ int i; for (i = 0; i < 3; i = tick(i)) { if (i == 2) break; } printint(calls); return 0; }
 '''
-    listing = convert(compile_text(source).asm, profile=core.load_profile('logisim'))
+    listing = convert(compile_target(source).asm, profile=core.load_profile('logisim'))
     for section, text in sections(listing):
         if text.startswith('.word') or text.startswith('.space'):
             assert section == 'data', f'{text} still sits in the text segment'

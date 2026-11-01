@@ -269,3 +269,75 @@ def assemble(text):
 def hex_image(words):
     """Logisim `v2.0 raw`: one 32-bit word per line, the format the course ROM uses."""
     return 'v2.0 raw\n' + ''.join(f'{word & 0xFFFFFFFF:08x}\n' for word in words)
+
+
+# --- pre-flight decoding -------------------------------------------------
+# Kept next to the encoder so the CLI can validate an image without importing
+# `tools/` (the compiler package must not depend on the development scripts).
+TRAPS = {0x00000073: 'ecall', 0x00100073: 'ebreak', 0x30200073: 'mret', 0x00200073: 'uret'}
+CSR = {1: 'csrrw', 2: 'csrrs', 3: 'csrrc', 5: 'csrrwi', 6: 'csrrsi', 7: 'csrrci'}
+HARDWARE_ONLY = frozenset({'divu', 'remu', 'csrrw', 'csrrsi', 'csrrci', 'uret'})
+R_FUNCT = {(0x00, 0): 'add', (0x20, 0): 'sub', (0x00, 1): 'sll', (0x00, 2): 'slt',
+           (0x00, 3): 'sltu', (0x00, 4): 'xor', (0x00, 5): 'srl', (0x20, 5): 'sra',
+           (0x00, 6): 'or', (0x00, 7): 'and'}
+M_FUNCT = {(0x01, 0): 'mul', (0x01, 1): 'mulh', (0x01, 2): 'mulhsu', (0x01, 3): 'mulhu',
+           (0x01, 4): 'div', (0x01, 5): 'divu', (0x01, 6): 'rem', (0x01, 7): 'remu'}
+I_FUNCT = {0: 'addi', 2: 'slti', 3: 'sltiu', 4: 'xori', 6: 'ori', 7: 'andi'}
+LOAD_FUNCT = {0: 'lb', 1: 'lh', 2: 'lw', 4: 'lbu', 5: 'lhu'}
+STORE_FUNCT = {0: 'sb', 1: 'sh', 2: 'sw'}
+BRANCH_FUNCT = {0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu'}
+
+
+def decode(word):
+    """Return the mnemonic a decoder for this ISA would see, or None."""
+    opcode = word & 0x7F
+    funct3 = (word >> 12) & 0x7
+    funct7 = (word >> 25) & 0x7F
+    if opcode == 0x33:
+        if funct7 == 0x01:
+            return M_FUNCT.get((funct7, funct3))
+        return R_FUNCT.get((funct7, funct3))
+    if opcode == 0x13:
+        if funct3 == 1:
+            return 'slli'
+        if funct3 == 5:
+            return {0x00: 'srli', 0x20: 'srai'}.get(funct7)
+        return I_FUNCT.get(funct3)
+    if opcode == 0x03:
+        return LOAD_FUNCT.get(funct3)
+    if opcode == 0x23:
+        return STORE_FUNCT.get(funct3)
+    if opcode == 0x63:
+        return BRANCH_FUNCT.get(funct3)
+    if opcode == 0x6F:
+        return 'jal'
+    if opcode == 0x67:
+        return 'jalr' if funct3 == 0 else None
+    if opcode == 0x37:
+        return 'lui'
+    if opcode == 0x17:
+        return 'auipc'
+    if opcode == 0x73:
+        if funct3:
+            return CSR.get(funct3)
+        return TRAPS.get(word)
+    return None
+
+
+def validate_image(rom, ram, profile, rom_words=1024, ram_bytes=1024):
+    """Return [problem] for a ROM/RAM pair loaded on the classroom CPU.
+
+    Both the ISA gate and the fixed capacities are checked; a `.rom.hex` that
+    silently exceeds the 1024-word ROM only fails on the bench, which is the
+    worst place to discover it.
+    """
+    problems = []
+    if len(rom) > rom_words:
+        problems.append(f'ROM {len(rom)} > {rom_words} words')
+    if len(ram) * 4 > ram_bytes:
+        problems.append(f'RAM {len(ram) * 4} > {ram_bytes} bytes')
+    allowed = set(profile.instructions) | HARDWARE_ONLY | {'ecall'}
+    outside = sorted({decode(word) or f'0x{word:08x}' for word in rom} - allowed)
+    if outside:
+        problems.append('out-of-ISA: ' + ' '.join(outside))
+    return problems

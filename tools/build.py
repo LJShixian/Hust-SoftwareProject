@@ -59,7 +59,7 @@ def build(source,profile=None,qemu=False,output=None,board=None,target='generic'
     # I/O routines use the same compiler/profile, as a library translation unit.
     io=core.compile(core.SourceFile((ROOT/'runtime/io.c').read_text(),'<runtime/io.c>'),profile,
                     options=compile_options(target,require_main=False))
-    if not io.success: raise RuntimeError(str(io.diagnostics))
+    if not io.success: raise RuntimeError(''.join(core.format_diagnostic(d) for d in io.diagnostics))
     io_asm=out.with_suffix('.io.s'); atomic_write(io_asm,io.asm)
     objects=[]
     boot=ASSETS/'runtime/start.s' if target=='cpu21' else ROOT/('adapters/qemu/runtime.s' if qemu else 'adapters/generic/runtime/start.s')
@@ -67,7 +67,7 @@ def build(source,profile=None,qemu=False,output=None,board=None,target='generic'
     if target=='cpu21':
         console=core.compile(core.SourceFile((ASSETS/'runtime/console.c').read_text(),'<runtime/console>'),profile,
                              options=compile_options(target,require_main=False))
-        if not console.success: raise RuntimeError(str(console.diagnostics))
+        if not console.success: raise RuntimeError(''.join(core.format_diagnostic(d) for d in console.diagnostics))
         console_asm=out.with_suffix('.console.s'); atomic_write(console_asm,console.asm); sources.append(console_asm)
     for i,path in enumerate(sources):
         if path.name in ('runtime.s','start.s','qemu.s'):
@@ -107,6 +107,7 @@ def build(source,profile=None,qemu=False,output=None,board=None,target='generic'
         'target':target,'qemu':qemu,'profile':profile.name,'profile_fingerprint':profile.fingerprint,
         'instructions':sorted(profile.instructions),'mmio':addresses,
         'rom_word_bits':32 if target=='cpu21' else 8,
+        'logisim_word_bits':32,
         'rom_words':8192 if target=='cpu21' else None,
         'binary_sha256':hashlib.sha256(blob).hexdigest(),
     },indent=2)+'\n')
@@ -130,7 +131,7 @@ def main(argv=None):
         board=kind().as_dict()
         if a.board_file:
             board=json.loads(Path(a.board_file).read_text(encoding='utf-8'))
-            kind.from_mapping(board)
+            board=kind.from_mapping(board).as_dict()
         if a.target=='cpu21' and (a.uart_tx is not None or a.exit_status is not None):
             raise ValueError('CPU21 has no UART/exit register; use --led and --seg for the exit status')
         for key in board:

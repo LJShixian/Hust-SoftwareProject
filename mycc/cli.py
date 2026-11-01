@@ -30,7 +30,7 @@ def parser():
     external.add_argument('--rars',action='store_true',
                           help='emit one self-contained .asm for the RARS simulator instead of GNU assembly')
     external.add_argument('--logisim',action='store_true',
-                          help='with --rars, also emit Logisim v2.0 raw ROM/RAM images next to -o')
+                          help='with --target logisim, also emit Logisim v2.0 raw ROM/RAM images next to -o')
     external.add_argument('--stack-top',type=lambda text:int(text,0),default=None,
                           help='value loaded into sp by the RARS entry stub (default 1024 with --logisim)')
     p.add_argument('--profile',default=None)
@@ -93,6 +93,12 @@ def run(argv=None):
         from .gui.app import launch
         return launch(args.source)
     if not args.source and not (args.dump_isa or args.dump_isa_whitelist): p.error('provide one .c source file, --gui, --doctor or --dump-isa')
+    if args.logisim and args.target != 'logisim':
+        # PF-01 contains lui/mul and a generic listing has PC-literal addresses;
+        # both produce an image the classroom decoder cannot run. Make the
+        # classroom target explicit instead of writing a dead ROM.
+        print('mycc: error: --logisim requires --target logisim (PF-08, bounded RAM addresses)',
+              file=sys.stderr); return 64
     if args.target == 'logisim':
         # The classroom target is one command: listing plus ROM/RAM images.
         args.rars = True
@@ -144,7 +150,9 @@ def run(argv=None):
             print(f'mycc: error: cannot create output directory for {args.o}: {exc}',file=sys.stderr); return 70
         try:
             text,rom,ram = images(result.asm,profile=profile,stack_top=stack_top)
-        except (ValueError,AssembleError) as exc:
+        except ValueError as exc:
+            print(f'mycc: error: {exc}',file=sys.stderr); return 64
+        except AssembleError as exc:
             print(f'mycc: error: cannot build a Logisim image: {exc}',file=sys.stderr); return 70
         try:
             atomic_write(args.o,text)
@@ -158,7 +166,13 @@ def run(argv=None):
         print(f'logisim: {rom_path.name} {len(rom)} words; sp={stack_top}'
               +(f'; {Path(args.o).with_suffix(".ram.hex").name} {len(ram)} words' if ram else '; no initialised data'))
         return 0
-    text=to_rars(result.asm,profile=profile,stack_top=args.stack_top) if args.rars else result.asm
+    if args.rars:
+        try:
+            text=to_rars(result.asm,profile=profile,stack_top=args.stack_top)
+        except ValueError as exc:
+            print(f'mycc: error: {exc}',file=sys.stderr); return 64
+    else:
+        text=result.asm
     try: atomic_write(args.o,text)
     except OSError as exc:
         print(f'mycc: error: cannot write {args.o}: {exc}',file=sys.stderr); return 70

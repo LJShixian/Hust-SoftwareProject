@@ -24,6 +24,8 @@ The conversion is deliberately a frontend-side text pass: the compiler keeps
 emitting GNU assembly, and nothing in ``mycc.core`` gains file access.
 """
 import re
+from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 from .core import lower_assembly
@@ -66,6 +68,8 @@ SINGLE_LABEL = re.compile(r'^([A-Za-z_.$][\w.$]*):$')
 LOCAL_LABEL = re.compile(r'\.L[\w.$]*')
 BLOCK = re.compile(r'(?m)^\.globl\s+(\S+)\s*$')
 DEFINED = re.compile(r'(?m)^([A-Za-z_.$][\w.$]*):')
+PC_POOL = re.compile(r'(?m)^\s*jal\s+[a-z][a-z0-9]*\s*,\s*\.Lpc_')
+TOKEN = re.compile(r'[A-Za-z_.$][\w.$]*')
 
 
 def _relabel(text, prefix):
@@ -86,25 +90,35 @@ def _drop_unreferenced(text, external=''):
     cannot afford them. A block survives when its exported name *or any label it
     defines* is still referenced outside it, so a block that also hosts a shared
     subroutine keeps it when a sibling needs it.
+
+    Reference counts are computed once and decremented when a block is dropped;
+    the previous implementation rebuilt and rescanned the whole listing for every
+    candidate block, which was quadratic for a large listing.
     """
     parts = BLOCK.split(text)
     if len(parts) < 3:
         return text
-    preamble, segments = parts[0], list(zip(parts[1::2], parts[2::2]))
+    preamble = parts[0]
+    segments = list(zip(parts[1::2], parts[2::2]))
+    tokens = Counter(TOKEN.findall(external + preamble + ''.join(body for _, body in segments)))
+    infos = []
+    for name, body in segments:
+        symbols = [name, *DEFINED.findall(body)]
+        inside = Counter(TOKEN.findall(body))
+        infos.append([name, body, symbols, inside, True])
     while True:
-        for index, (name, block) in enumerate(segments):
-            outside = external + preamble + ''.join(body for other, (_n, body) in enumerate(segments)
-                                                    if other != index)
-            symbols = [name, *DEFINED.findall(block)]
-            # `\b` does not fire at the dot of `.Lfoo` (both sides are non-word
-            # characters), so use an explicit boundary instead.
-            if not any(re.search(rf'(?<![\w.$]){re.escape(symbol)}(?![\w.$])', outside)
-                       for symbol in symbols):
-                segments.pop(index)
+        for info in infos:
+            if not info[4]:
+                continue
+            name, body, symbols, inside, _ = info
+            if not any(tokens[symbol] - inside[symbol] > 0 for symbol in symbols):
+                info[4] = False
+                for symbol, count in inside.items():
+                    tokens[symbol] -= count
                 break
         else:
             break
-    return preamble + ''.join(f'.globl {name}{body}' for name, body in segments)
+    return preamble + ''.join(f'.globl {name}{body}' for name, body, _, _, keep in infos if keep)
 
 
 def _rewrite(line):
@@ -224,14 +238,22 @@ def _entry(stack_top, profile):
 PORT_SOURCES = ('io.c', 'input.c')
 
 
+@lru_cache(maxsize=8)
 def _io_unit(profile):
     """Compile the C half of the platform port.
 
     `printint`/`printhex`/`printstr` are ordinary C layered on `putchar`, exactly
     as a C library sits on top of a platform's character primitive. Keeping them in
     C means the simulator and the board run the same library code.
+
+    The compiler appends its minimal-ISA helpers to each unit. Merging several
+    such units would duplicate `__mv_*` labels, so strip them here and let
+    `convert` re-lower the merged listing exactly once. The cache key is the
+    profile object (frozen and hashable); check_logisim converts eleven programs
+    per run, so recompiling these two files every time was measurable.
     """
     from .core import CompileOptions, SourceFile, compile as compile_source
+    from .core.driver import format_diagnostic
     units = []
     for name in PORT_SOURCES:
         path = ROOT / 'runtime' / name
@@ -240,9 +262,22 @@ def _io_unit(profile):
         result = compile_source(SourceFile(path.read_text(encoding='utf-8'), f'<runtime/{name}>'),
                                 profile, options=CompileOptions(require_main=False))
         if not result.success:
-            raise ValueError(''.join(result.diagnostics))
-        units.append(result.asm)
-    return units
+            raise ValueError(''.join(format_diagnostic(d) for d in result.diagnostics))
+        units.append(result.asm.replace(MINIMAL_HELPERS, ''))
+    return tuple(units)
+
+
+def _reject_pc_pool(text, profile):
+    """Reject a listing whose global addresses need a readable text segment.
+
+    On a Harvard machine (and in this converter) a `.word` pool inside `.text`
+    cannot be read back with `lw`. Without `lui` the compiler falls back to that
+    pool, so RARS output would silently read a wrong address. Refuse instead of
+    producing a listing that runs incorrectly.
+    """
+    if profile is not None and not profile.has('lui') and PC_POOL.search(text):
+        raise ValueError('RARS output cannot use the PC-literal address pool without lui; '
+                         'keep lui enabled or use --target logisim')
 
 
 def convert(asm, profile=None, runtime=True, stack_top=None, extra_units=()):
@@ -256,24 +291,32 @@ def convert(asm, profile=None, runtime=True, stack_top=None, extra_units=()):
     if profile is None:
         from .core import load_profile
         profile = load_profile()
+    if stack_top is None and profile.name == 'logisim':
+        # The classroom CPU resets every register to zero; RARS normally supplies
+        # a stack pointer, the hardware does not. A converter that forgets this
+        # produces a program whose first push writes to 0xFFFFFFFx.
+        stack_top = 1024
+    _reject_pc_pool(asm, profile)
     units = list(extra_units)
     if runtime:
         # Each C file is its own unit: codegen numbers local labels from 1, so two
         # files merged first and relabelled later would collide.
-        units = _io_unit(profile) + units
-    body = asm
+        units = list(_io_unit(profile)) + units
+    body = asm.replace(MINIMAL_HELPERS, '')
     for index, unit in enumerate(units, start=1):
+        _reject_pc_pool(unit, profile)
         body += '\n' + _drop_unreferenced(_relabel(unit, f'u{index}_'), external=body)
     if runtime and RUNTIME.exists():
         body += '\n' + _drop_unreferenced(RUNTIME.read_text(encoding='utf-8'), external=body)
     # Keep the visible entry name for RARS while the compiled main keeps its body.
+    # Calls to main (a legal, if unusual, C program) must follow the rename too.
     body = re.sub(r'(?m)^\.globl\s+main\b', '.globl __mycc_main', body)
     body = re.sub(r'(?m)^main:', '__mycc_main:', body)
-    if profile is not None:
-        # Re-lower the whole listing so the handwritten runtime obeys the profile
-        # too; drop the compiler's helper copy first or the labels collide.
-        body = body.replace(MINIMAL_HELPERS, '')
-        body = lower_assembly(body, profile)
+    body = re.sub(r'(?m)(\bjal\s+(?:ra|zero|[a-z][a-z0-9]*)\s*,\s*)main\b', r'\1__mycc_main', body)
+    # Re-lower the merged listing once so the handwritten runtime obeys the
+    # profile too. Helper copies were stripped from the units above, so this is
+    # the single definition of each __mv_* symbol.
+    body = lower_assembly(body, profile)
     lines = [line for line in (_rewrite(x) for x in body.splitlines()) if line is not None]
     text = '\n'.join(_sectionize(lines)) + '\n'
     defined = set(LABEL.findall(text))
@@ -288,9 +331,16 @@ def convert(asm, profile=None, runtime=True, stack_top=None, extra_units=()):
 
 def images(asm, profile=None, runtime=True, stack_top=None, extra_units=()):
     """Return (listing, rom_words, ram_words): a Logisim ROM/RAM image pair."""
+    if profile is None:
+        from .core import load_profile
+        profile = load_profile()
     text = convert(asm, profile=profile, runtime=runtime, stack_top=stack_top,
                    extra_units=extra_units)
     rom_words, ram_words, _ = assemble(text)
+    from .encode import validate_image
+    problems = validate_image(rom_words, ram_words, profile)
+    if problems:
+        raise ValueError('Logisim image check failed: ' + '; '.join(problems))
     return text, rom_words, ram_words
 
 

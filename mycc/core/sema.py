@@ -1,6 +1,6 @@
 """Lexical scopes and type checking; intentionally knows nothing about ISA."""
 from dataclasses import dataclass
-from .types import INT, PTR, VOID, Diagnostic, CompileError, constant, fail
+from .types import INT, PTR, VOID, CType, Diagnostic, CompileError, constant, fail
 
 
 @dataclass
@@ -89,9 +89,20 @@ class Analyzer:
         plan, run, index = [], [], 0
 
         def flush():
-            if run:
-                plan.append(('text', self.literal(run)))
+            if not run:
+                return
+            if name == 'scanf':
+                # A scanf format is an input template, not output. Matching
+                # arbitrary literal text is not implemented; whitespace is
+                # handled by readint/readchar, and anything else is rejected
+                # instead of being printed to stdout.
+                if any(code not in (9, 10, 13, 32) for code in run):
+                    self.error(fmt, 'literal text is not supported in scanf; use whitespace between conversions',
+                               'E-SEMA-FORMAT')
                 del run[:]
+                return
+            plan.append(('text', self.literal(run)))
+            del run[:]
 
         codes = list(fmt.value)
         i = 0
@@ -225,6 +236,7 @@ class Analyzer:
                     if self.reporter.error_count()>=20: raise
             if new_scope: self.scopes.pop()
         elif n.kind == 'decl':
+            self.resolve_array(n)
             self.declare(n)
             self.initializer(n)
         elif n.kind == 'expr': self.expression(n.children[0])
@@ -251,6 +263,25 @@ class Analyzer:
                 if self.expression(cond) == VOID: self.error(cond, 'condition cannot be void')
             self.statement(body)
             self.loop -= 1; self.scopes.pop()
+
+    def resolve_array(self, n):
+        """Evaluate an array bound after the symbols it names have a type.
+
+        The parser cannot do this: `int a[sizeof b]` needs b's type, and at parse
+        time every node is still the default `int`. Folding there returned 4
+        instead of 12 for an `int b[3]` and silently allocated a short array.
+        """
+        size = getattr(n, 'size_expr', None)
+        if size is None or n.type.kind != 'array':
+            return
+        self.expression(size)
+        try:
+            length = constant(size)
+            if not 0 < length <= 32768:
+                raise ValueError("array length must be in 1..32768")
+        except (ValueError, KeyError) as exc:
+            self.error(size, str(exc), 'E-SEMA-ARRAY-LENGTH')
+        n.type = CType('array', length)
 
     def initializer(self,n,global_=False):
         if n.type.kind == 'array' and len(n.children) > n.type.length: self.error(n,'too many array initializers')
@@ -297,6 +328,8 @@ class Analyzer:
                     self.error(n,'runtime function signature mismatch')
                 self.scopes[0].pop(n.value)
             defined.add(n.value)
+            if n.kind == 'decl':
+                self.resolve_array(n)
             self.declare(n,True,[p.type for p in n.children[:-1]] if n.kind == 'func' else None)
         main = self.scopes[0].get('main')
         if require_main and (not main or main.params != [] or main.type != INT):

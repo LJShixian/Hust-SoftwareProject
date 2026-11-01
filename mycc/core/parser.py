@@ -1,5 +1,5 @@
 """Recursive descent declarations/statements and precedence climbing expressions."""
-from .types import Node, CType, INT, PTR, VOID, CompileError, constant, fail
+from .types import Node, CType, INT, PTR, VOID, CompileError, fail
 
 PRECEDENCE = {}
 for level, group in enumerate(["= += -= *= /= %= &= |= ^= <<= >>=", "||", "&&", "|", "^", "&", "== !=", "< <= > >=", "<< >>", "+ -", "* / %"], 1):
@@ -45,19 +45,20 @@ class Parser:
         return typ
 
     def decl(self, typ, name, parameter=False):
+        size_expr = None
         if self.accept('['):
+            if typ.kind == 'ptr':
+                self.error('arrays of pointers are not supported', 'E-UNSUPPORTED-CONSTRUCT')
             if parameter:
                 self.take(']')
                 typ = PTR
             else:
-                size = self.expr()
+                # The bound is evaluated in sema, after the symbols it may name
+                # (`int a[sizeof b]`) have a type. Folding here used the default
+                # `int` type and silently allocated 4 bytes instead of 12.
+                size_expr = self.expr()
                 self.take(']')
-                try:
-                    length = constant(size)
-                    if not 0 < length <= 32768: raise ValueError("array length must be in 1..32768")
-                except (ValueError, KeyError) as exc:
-                    self.error(str(exc), "E-SEMA-ARRAY-LENGTH")
-                typ = CType('array', length)
+                typ = CType('array', 0)
         children = []
         if not parameter and self.accept('='):
             if self.accept('{'):
@@ -69,7 +70,10 @@ class Parser:
                 self.take('}')
             else:
                 children.append(self.expr())
-        return Node('decl', name, children, name.text, typ)
+        node = Node('decl', name, children, name.text, typ)
+        if size_expr is not None:
+            node.size_expr = size_expr
+        return node
 
     def program(self):
         out = Node('program', self.t)

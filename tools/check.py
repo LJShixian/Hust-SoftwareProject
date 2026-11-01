@@ -51,7 +51,10 @@ def main():
     bad=logisim_check(quiet=True)
     if bad:
         print('\n'.join(bad)); return 1
-        print('logisim: images honour the course ISA and fit the 1024-word ROM / 1024-byte RAM',flush=True)
+    print('logisim: images honour the course ISA and fit the 1024-word ROM / 1024-byte RAM',flush=True)
+    from .check_rars import main as rars_check
+    rars_code=rars_check([])
+    if rars_code: return rars_code
     if args.full:
         try: tool('as'); tool('gcc')
         except RuntimeError as exc: print(exc); return 1

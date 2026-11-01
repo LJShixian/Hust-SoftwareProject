@@ -181,7 +181,7 @@ class Generator:
         self.mark('FORMAT',n.symbol.name)
         for kind,payload in n.plan:
             if kind=='text':
-                self.string_address(payload); self.emit('jal ra,printstr')
+                if n.symbol.name=='printf': self.string_address(payload); self.emit('jal ra,printstr')
             else:
                 self.expression(payload); self.emit(f'jal ra,{kind}')
 
@@ -507,7 +507,10 @@ def lower_assembly(text,profile,include_helpers=True):
     valid both for generated expressions and handwritten runtime assembly.
     """
     import re
-    regs=['ra','t0','t1','t2','t3','t4','t5','t6',*[f'a{i}' for i in range(8)]]
+    # The __mv_* helpers clobber t0-t6 and a0/a1 (and ra through the call), so
+    # saving only those keeps the fallback small. a2-a7/s0.. are untouched and
+    # can be used as operands or destinations without a save slot.
+    regs=['ra','t0','t1','t2','t3','t4','t5','t6','a0','a1']
     slots={reg:i*4 for i,reg in enumerate(regs)}
     slots['zero']=None
     out=[]; needed=False
@@ -525,23 +528,30 @@ def lower_assembly(text,profile,include_helpers=True):
             offset,base=re.fullmatch(r'(-?\d+)\((\w+)\)',address).groups()
             rd,rs,arg='zero',base,value
         else: rd,rs,arg=operands
-        out.append('addi sp,sp,-64')
+        out.append('addi sp,sp,-48')
         out.extend(f'sw {r},{offset}(sp)' for r,offset in slots.items() if offset is not None)
         def saved(reg,dest):
             if reg=='zero': return f'addi {dest},zero,0'
-            if reg=='sp': return f'addi {dest},sp,64'
+            if reg=='sp': return f'addi {dest},sp,48'
             if reg=='s0': return f'addi {dest},s0,0'
-            return f'lw {dest},{slots[reg]}(sp)'
+            offset=slots.get(reg)
+            if offset is not None: return f'lw {dest},{offset}(sp)'
+            # a2-a7 and the callee-saved registers are not touched by __mv_*.
+            return f'addi {dest},{reg},0'
         out.append(saved(rs,'a0'))
         out.append(f'addi a1,zero,{arg}' if op in immediate else saved(arg,'a1'))
         if op=='sb' and int(offset): out.append(f'addi a0,a0,{offset}')
         operation='sb' if op=='sb' else immediate.get(op,binary.get(op))
         if operation=='slt': out.append('slt a0,a0,a1')
         else: out.append(f'jal ra,__mv_{operation}'); needed=True
-        if rd!='zero': out.append(f'sw a0,{slots[rd]}(sp)')
+        if rd=='zero': pass
+        elif rd in slots: out.append(f'sw a0,{slots[rd]}(sp)')
+        elif rd=='sp': raise ValueError('cannot lower an instruction that writes sp')
+        else: out.append(f'addi {rd},a0,0')
         out.extend(f'lw {r},{offset}(sp)' for r,offset in slots.items() if offset is not None)
-        out.append('addi sp,sp,64')
-    if needed and include_helpers:
+        out.append('addi sp,sp,48')
+    has_helpers=any(line.strip().startswith('__mv_') and line.strip().endswith(':') for line in out)
+    if (needed or any('__mv_' in line for line in out)) and not has_helpers and include_helpers:
         # Localize helper labels per object to avoid duplicate global definitions.
         out.append(MINIMAL_HELPERS)
     return '\n'.join(out)+'\n'
