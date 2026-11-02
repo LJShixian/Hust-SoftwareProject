@@ -7,3 +7,7 @@ htmlcov/
 build/
 *.egg-info/
 .mycc-tmp-*
+
+# 生成的示例产物与本地课堂工具链（Logisim/课程 jar）不入库
+/examples/logisim/out/
+/logisim/

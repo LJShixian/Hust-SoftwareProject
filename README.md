@@ -1,6 +1,6 @@
 # mycc — 可配置指令集的 C 子集编译器（v3.1）
 
-> **当前分支为 `v3.1-ide`**：从 `zjb` 派生。`zjb` 在 `main` 第一版 `8a5d050` 的基础上完成了前四轮（对齐需求/设计、接入 Logisim 课堂 CPU、标准 RISC-V 系统调用、字符串字面量与 `printf`/`scanf`）；本分支追加第五轮 **v3.0**（走查修复与镜像体积优化）和第六轮 **v3.1**（IDE 化工作台、主题、格式化/补全、Ctrl+S、完整 CLI 开关映射与输出路径修复）。改动与验证数据见 [本分支改动说明](#本分支改动说明)。
+> **当前集成分支为 `main`**：`main` 的第一版是 `8a5d050`；`zjb` 在其上完成前四轮（对齐需求/设计、接入 Logisim 课堂 CPU、标准 RISC-V 系统调用、字符串字面量与 `printf`/`scanf`），`v3.1-ide` 追加第五轮 **v3.0**（走查修复与镜像体积优化）和第六轮 **v3.1**（IDE 化工作台、主题、格式化/补全、Ctrl+S、完整 CLI 开关映射与输出路径修复），第七轮 **v3.1 演示与 GUI 修复**（行号跟随滚动、滚轮防误改、自定义指令可回退、课堂演示脚本）已合入 `main`。改动与验证数据见 [本分支改动说明](#本分支改动说明)。
 
 mycc 3.1.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，生成 **GNU RISC-V 汇编、源码诊断和指令选择说明**。可在命令行使用，也可在 PySide6 工作台中编辑、编译和查看结果。
 
@@ -10,19 +10,20 @@ mycc 3.1.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，�
 
 ## 版本与分支
 
-当前源码版本为 **3.1.0**，分支为 **`v3.1-ide`**，基线是 `zjb`（远端 `origin/zjb`）。版本关系如下，后一版只在前一版上增加功能或修正，不回退已有行为：
+当前源码版本为 **3.1.0**，集成分支为 **`main`**（已合入 `v3.1-ide`），`v3.1-ide` 的基线是 `zjb`（远端 `origin/zjb`）。版本关系如下，后一版只在前一版上增加功能或修正，不回退已有行为：
 
 | 阶段 | 所在分支 | 主要工作 |
 |---|---|---|
 | 前四轮（v2.0） | `zjb` | 需求/设计对齐、Logisim 课堂 CPU 适配、标准系统调用、字符串与 `printf`/`scanf` |
 | 第五轮（v3.0） | `v3.1-ide` | 按代码走查修复、Logisim 镜像/ISA 预检、体积与转换时间优化 |
 | 第六轮（v3.1） | `v3.1-ide` | IDE 式 GUI、主题、全部 CLI 开关、格式化/自动缩进/补全、Ctrl+S、输出文件/目录 |
+| 第七轮（v3.1 演示与 GUI 修复） | `main` | 行号跟随滚动、滚轮防误改、自定义指令可回退、课堂演示脚本 `demo.cmd` |
 
 因此，README 中 v3.0/v3.1 的说明是**累计关系**：v3.1 包含 v3.0 的全部修复和优化，而不是两套互相替代的配置。
 
 ## 本分支改动说明
 
-`main` 的 `8a5d050` 是第一版实现。`zjb` 在其上完成前四轮；当前 `v3.1-ide` 追加 v3.0 和 v3.1 两轮，下面按六轮累计列出（`git diff --stat 8a5d050` 可看净变化）：
+`main` 的 `8a5d050` 是第一版实现。`zjb` 在其上完成前四轮；`v3.1-ide` 追加 v3.0 与 v3.1，`main` 再合入第七轮，下面按七轮累计列出（`git diff --stat 8a5d050` 可看净变化）：
 
 ### 轮次一：对齐需求与设计文档
 
@@ -133,7 +134,7 @@ Logisim 镜像体积（修改前 → 修改后，字）：`hello 462→450`、`s
 |---|---|
 | `python -m compileall -q mycc adapters tools runtime` | 退出码 0 |
 | `python -m pytest -q` | **172 passed, 13 skipped**（skip 为 RARS/CPU21/外部工具链缺失） |
-| `python -m tools.check_logisim` | 11 个程序，0 问题（ROM 272~956；RAM ≤ 644 字节） |
+| `python -m tools.check_logisim` | 13 个程序，0 问题（ROM 272~956；RAM ≤ 644 字节） |
 | `python -m tools.check_docs` / `check_architecture` | 通过 |
 | `python -m mycc --version` | `mycc 3.0.0` |
 | RV32I 解释器运行 | `demo` 七行输出正确；`printf` → `hello 42 0x000000ff A ok`；`scanf` 输入 `17 25` → `17+25=42`；控制流/指针/`sizeof`/`INT_MIN` → `8/20/12/-2147483648` |
@@ -186,8 +187,26 @@ v3.1 把工作台从“能编译的窗口”升级为可日常使用的 IDE 式�
 - 输出路径可以是文件，也可以是文件夹：文件夹用“文件夹…”选择（或直接输入现有目录/带 `/` 的目录/无后缀路径），按源文件名写入 `demo.s`、`demo.asm`、`demo.rom.hex` 等；也可以用“文件…”精确指定文件名。
 - 输出路径留空不会自动落盘；仍可用“导出当前页…”单独保存任一输出页。
 - `test_workbench.py`、`test_editor.py` 与新增的 `tests/test_regressions.py` 覆盖：命令预览开关、三种目标的落盘、目录输出、文件夹浏览、Ctrl+S 保存、主题/目标设置持久化、GUI 目标切换与主题切换、格式化/自动缩进/括号配对/补全。
-- v3.1 当前：**185 passed / 13 skipped**、`tools.check_logisim` 11 个程序 0 问题、`tools.check_docs` 与 `tools.check_architecture` 通过；主题切换在 QTest/offscreen 下验证；`python -m mycc --version` 输出 **3.1.0**。
+- v3.1 当前：**196 passed / 2 skipped**、`tools.check_logisim` 13 个程序 0 问题、`tools.check_docs` 与 `tools.check_architecture` 通过；主题切换与行号滚动在 QTest/offscreen 下验证；`python -m mycc --version` 输出 **3.1.0**。
 - 限制：本机无 RARS jar，RARS 端到端仍按设计跳过；CPU21/Vivado 未在本环境执行。
+
+
+
+### 轮次七（v3.1 演示与 GUI 修复，2026-11-02）
+
+面向课堂演示的一轮修复，交互行为都在 offscreen Qt 下逐项验证：
+
+| 主题 | 位置 | 内容 |
+|---|---|---|
+| 行号跟随滚动 | `mycc/gui/views.py` | 行号栏是独立控件，原先只在 `textChanged`/`cursorPositionChanged` 时同步；新增 `sync_number_scroll()` 并接到 `verticalScrollBar().valueChanged`，滚轮、拖动、翻页时行号与正文一起移动 |
+| 滚轮防误改选项 | `mycc/gui/views.py` | `WHEEL_GUARDED`（`QComboBox`/`QCheckBox`/`QRadioButton`/`QAbstractSpinBox`/`QSlider`）上的滚轮事件一律拦截并转发给外层滚动区：不再误改 profile/目标/主题，侧栏仍可正常滚动；侧栏每个值控件另装一次过滤器兜底 |
+| 自定义指令可回退 | `mycc/gui/workbench.py`、`mycc/gui/views.py` | 新增 `capability_snapshot()`（不抛异常、不做可行性校验）并导出 `core.expand`；ISA 非法（关掉 MV-ISA、ISA 文件损坏、设置里的旧项）时对话框仍能打开并提示如何修正；点“确定”若缺少 MV-ISA 必需指令，会列出缺失项并退回对话框 |
+| 课堂演示脚本 | `demo.cmd`（新增） | 九段交互菜单（`demo.cmd a` 连播、`demo.cmd 3` 单段彩排），覆盖环境自检、ISA 数量、软件/硬件乘法对比、`--no-vshift` 代价、一键镜像、镜像预检、回归全绿、启动工作台 |
+| 新增示例 | `examples/logisim/hannuo.c`、`examples/logisim/hello world.c` | 汉诺塔（`scanf` + `printf`，Logisim ROM 724 字）与最小 `printf("hello world")`（ROM 81 字）；`tools.check_logisim` 现覆盖 13 个程序 |
+| 代码风格 | `mycc/core/`、`mycc/gui/` | 统一为 black 风格排版（仅格式，无行为变化） |
+| 示例调整 | `examples/compiler/compiler_demo.c` | 追加 `j = j << 10` 一行用于演示移位；保持 C 子集可编译（本子集不接受 `int i,j=1;` 这类逗号多声明符） |
+
+验证：`pytest` **196 passed / 2 skipped**；`tools.check_logisim` 13 个程序 0 问题（ROM 272~956 / 上限 1024，RAM ≤ 644 字节）；`check_docs`、`check_architecture` 通过；行号同步与滚轮拦截在 offscreen Qt 下验证。
 
 
 
@@ -214,7 +233,7 @@ v3.1 把工作台从“能编译的窗口”升级为可日常使用的 IDE 式�
 
 ### 验证结果（v2.0 历史，2026-10-28）
 
-> 以下为 v2.0 当时的结果记录；v3.0 的记录为 172 passed / 13 skipped，v3.1 当前结果（185 passed / 13 skipped、ROM 272~956 等）见上方“轮次六”。
+> 以下为 v2.0 当时的结果记录；v3.0 的记录为 172 passed / 13 skipped，当前结果（196 passed / 2 skipped、ROM 272~956 等）见上方“轮次六”与“轮次七”。
 
 | 项目                   | 结果                                                                                                     |
 | ---------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -246,6 +265,11 @@ python -m mycc examples/compiler/compiler_demo.c --enable mul -o build/demo/mul.
 # 无需源文件也能查看最终 ISA
 python -m mycc --dump-isa
 python -m mycc --dump-isa-whitelist
+
+# 课堂演示：交互菜单（a 连播、编号单段彩排、q 退出）
+.\demo.cmd
+.\demo.cmd a
+.\demo.cmd 3
 ```
 
 `compiler_demo.c` 定义 `square`，循环累加 0² 至 5²，再调用输出函数。预期运行输出为 `55` 加换行；上述命令只生成汇编，并未运行程序。
@@ -269,6 +293,7 @@ SoftwareEngineering/
 ├─ pyproject.toml                  包元数据、可选依赖及 pytest 配置
 ├─ requirements.txt / THIRD_PARTY.md  GUI 依赖 / 第三方说明
 ├─ launch.cmd / check.cmd          Windows GUI / 检查快捷入口
+├─ demo.cmd                        课堂演示脚本（九段，可交互或单段）
 ├─ mycc/                           编译器软件
 │  ├─ __main__.py / cli.py         模块入口、参数解析和文件读写
 │  ├─ rars.py                      RARS 单文件导出、镜像 I/O 映射
@@ -505,7 +530,7 @@ python -m tools.check_isa_consistency adapters/cpu21/hw_caps.json --profile cpu2
 
 CPU21 输出 `.s`、中间 `.o`、`.elf`、`.bin`、`.hex`、`.vh`、Logisim 镜像和 manifest。JSON 地址必须符合硬件实际译码；软件可配置不代表硬件地址随之改变。CPU21 无 UART，输出走 VGA，退出状态写 LED/SEG。
 
-本次整理后常规检查为 **131 passed、1 skipped**，覆盖率 92% 且门槛通过。检查包括错误恢复、输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵。本机缺少 `qemu-riscv32`，执行/GCC 对照仍未验证；`--full` 将缺工具作为失败。
+本次常规检查为 **196 passed、2 skipped**，语句覆盖率 79% 且门槛通过。检查包括错误恢复、输出保护、GUI offscreen、真实 GNU 汇编/链接及 54 组合 ISA 矩阵。本机缺少 `qemu-riscv32`，执行/GCC 对照仍未验证；`--full` 将缺工具作为失败。
 
 CPU21 回归检查退出状态、VGA 600 个打包显存字、控制寄存器与栈故障行为，并对比外部工程前后文件哈希。本次整理后 **18 项回归全部通过，外部 84 个文件哈希一致**，见 [本次验证记录](docs/verification/layout-results-2026-10-26.json) 与 [CPU21 周期数据](docs/verification/cpu21-results-2026-10-26.json)。此前 [0.3.0 范围验收](docs/verification/scope-results-0.3.0-2026-10-26.json) 保留；新运行输出写 `build/cpu21-verification/`。
 
