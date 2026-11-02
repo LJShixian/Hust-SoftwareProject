@@ -12,12 +12,12 @@ mycc 3.1.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，�
 
 当前源码版本为 **3.1.0**，集成分支为 **`main`**（已合入 `v3.1-ide`），`v3.1-ide` 的基线是 `zjb`（远端 `origin/zjb`）。版本关系如下，后一版只在前一版上增加功能或修正，不回退已有行为：
 
-| 阶段 | 所在分支 | 主要工作 |
-|---|---|---|
-| 前四轮（v2.0） | `zjb` | 需求/设计对齐、Logisim 课堂 CPU 适配、标准系统调用、字符串与 `printf`/`scanf` |
-| 第五轮（v3.0） | `v3.1-ide` | 按代码走查修复、Logisim 镜像/ISA 预检、体积与转换时间优化 |
-| 第六轮（v3.1） | `v3.1-ide` | IDE 式 GUI、主题、全部 CLI 开关、格式化/自动缩进/补全、Ctrl+S、输出文件/目录 |
-| 第七轮（v3.1 演示与 GUI 修复） | `main` | 行号跟随滚动、滚轮防误改、自定义指令可回退、课堂演示脚本 `demo.cmd` |
+| 阶段                           | 所在分支   | 主要工作                                                                      |
+| ------------------------------ | ---------- | ----------------------------------------------------------------------------- |
+| 前四轮（v2.0）                 | `zjb`      | 需求/设计对齐、Logisim 课堂 CPU 适配、标准系统调用、字符串与 `printf`/`scanf` |
+| 第五轮（v3.0）                 | `v3.1-ide` | 按代码走查修复、Logisim 镜像/ISA 预检、体积与转换时间优化                     |
+| 第六轮（v3.1）                 | `v3.1-ide` | IDE 式 GUI、主题、全部 CLI 开关、格式化/自动缩进/补全、Ctrl+S、输出文件/目录  |
+| 第七轮（v3.1 演示与 GUI 修复） | `main`     | 行号跟随滚动、滚轮防误改、自定义指令可回退、课堂演示脚本 `demo.cmd`           |
 
 因此，README 中 v3.0/v3.1 的说明是**累计关系**：v3.1 包含 v3.0 的全部修复和优化，而不是两套互相替代的配置。
 
@@ -27,55 +27,55 @@ mycc 3.1.0 接收 **一个受限 C 源文件和可用指令集合（ISA）**，�
 
 ### 轮次一：对齐需求与设计文档
 
-| 主题           | 位置                                        | 内容                                                                                                                                                          |
-| -------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 主题           | 位置                                    | 内容                                                                                                                                                 |
+| -------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 指令选择可追溯 | `mycc/core/codegen.py`、`driver.py`     | `LoweringRecord`：每条降级记录源位置 `file:line:col`、选中理由、被拒方案（含缺失指令）、指令数增量；`--dump-lowering-report` 增加位置与 `Δ指令` 两列 |
-| 诊断质量       | `mycc/core/parser.py`                     | 文件作用域出现语句时报 `E-PARSE-FILE-SCOPE` 并给出修复建议                                                                                                  |
-| 诊断质量       | `mycc/core/sema.py`                       | 新增 `W-SEMA-INFINITE-RECURSION`，只警告不阻断生成                                                                                                          |
-| RARS 后端      | `mycc/rars.py`、`mycc/cli.py`           | `--rars` 输出 RARS 可直接汇编运行的单文件 `.asm`                                                                                                          |
-| 文档一致性门禁 | `tools/check_docs.py`、`tools/check.py` | README 预设表、`configs/isa/presets` 与 `core/isa.py` 三方对齐；另生成源码哈希                                                                            |
-| 工作台         | `mycc/gui/views.py`、`workbench.py`     | 去掉与菜单重复的工具栏；导出按当前页决定格式；悬停即在状态栏解释；修正能力配置被持久化成错误指令数的问题                                                      |
-| 回归工具健壮性 | `tools/verify_cpu21.py`                   | 源码哈希按 UTF-8 读取；新增 ASCII 暂存目录，绕开 Vivado `-testplusarg` 无法承载非 ASCII 路径的限制                                                          |
+| 诊断质量       | `mycc/core/parser.py`                   | 文件作用域出现语句时报 `E-PARSE-FILE-SCOPE` 并给出修复建议                                                                                           |
+| 诊断质量       | `mycc/core/sema.py`                     | 新增 `W-SEMA-INFINITE-RECURSION`，只警告不阻断生成                                                                                                   |
+| RARS 后端      | `mycc/rars.py`、`mycc/cli.py`           | `--rars` 输出 RARS 可直接汇编运行的单文件 `.asm`                                                                                                     |
+| 文档一致性门禁 | `tools/check_docs.py`、`tools/check.py` | README 预设表、`configs/isa/presets` 与 `core/isa.py` 三方对齐；另生成源码哈希                                                                       |
+| 工作台         | `mycc/gui/views.py`、`workbench.py`     | 去掉与菜单重复的工具栏；导出按当前页决定格式；悬停即在状态栏解释；修正能力配置被持久化成错误指令数的问题                                             |
+| 回归工具健壮性 | `tools/verify_cpu21.py`                 | 源码哈希按 UTF-8 读取；新增 ASCII 暂存目录，绕开 Vivado `-testplusarg` 无法承载非 ASCII 路径的限制                                                   |
 
 ### 轮次二：硬件综合训练 Logisim 课堂 CPU
 
 目标：**现场写一段 C，一条命令拿到可载入 Logisim ROM/RAM 的镜像**，不依赖 Java、RARS 或 GNU 工具链。
 
-| 主题         | 位置                                                                            | 内容                                                                                                                                                                                                           |
-| ------------ | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 新目标与预设 | `adapters/logisim/`、`mycc/core/isa.py`、`configs/isa/presets/PF-08.json` | `--target logisim` 与预设 `PF-08`：按课程设计报告表 1.1 建模 24 条可编码指令（硬件译码 31 条），1024 字 ROM / 1024 字节 RAM，无链接器                                                                      |
-| 内置汇编器   | `mycc/encode.py`（新增）                                                      | 把自产的单文件汇编直接编码成机器码：R/I/S/B/U/J 型、`%hi/%lo`、`.text/.data/.align/.word/.space`；与真 RARS 逐字比对通过                                                                                   |
-| 镜像导出     | `mycc/cli.py`、`mycc/rars.py`                                               | `--logisim` 输出 `v2.0 raw` 的 `.rom.hex` 与（有初值全局变量时）`.ram.hex`；入口存根装载 `sp`（默认 1024），全局变量改用有界 `%lo` 重定位（Harvard 上 `lw` 读不到 ROM）                          |
-| 缺陷修复     | `mycc/rars.py`、`tools/build.py`                                            | ① `--rars` 原先不对 `runtime.s` 做降级，受限指令集下会漏出 `sltu`；② `switch` 的 `.word` 跳转表落在 `.text` 里，RARS 直接拒绝、硬件也读不到；③ `.logisim.hex` 原先逐字节写出，字宽 ROM 会跑飞 |
-| 预检工具     | `tools/check_logisim.py`（新增）                                              | 零依赖：把镜像反汇编回来检查指令是否都在该 CPU 的译码范围内、容量是否超限                                                                                                                                      |
-| 交叉校验     | `tools/check_rars.py`（新增）                                                 | 与真 RARS 逐字对照汇编结果，并对同一程序做行为差分；缺 Java 时自动跳过                                                                                                                                         |
-| 课堂演示     | `examples/logisim/demo.c`、`demo_pause.c`（新增）                           | 全局数组初值 → 指针遍历累加 → 最大值 → 软件乘 → 软件除 → SLL → XOR，七行可读文本；`demo_pause.c` 是每行后面停一次钟的讲演版                                                                            |
+| 主题         | 位置                                                                      | 内容                                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新目标与预设 | `adapters/logisim/`、`mycc/core/isa.py`、`configs/isa/presets/PF-08.json` | `--target logisim` 与预设 `PF-08`：按课程设计报告表 1.1 建模 24 条可编码指令（硬件译码 31 条），1024 字 ROM / 1024 字节 RAM，无链接器                                                         |
+| 内置汇编器   | `mycc/encode.py`（新增）                                                  | 把自产的单文件汇编直接编码成机器码：R/I/S/B/U/J 型、`%hi/%lo`、`.text/.data/.align/.word/.space`；与真 RARS 逐字比对通过                                                                      |
+| 镜像导出     | `mycc/cli.py`、`mycc/rars.py`                                             | `--logisim` 输出 `v2.0 raw` 的 `.rom.hex` 与（有初值全局变量时）`.ram.hex`；入口存根装载 `sp`（默认 1024），全局变量改用有界 `%lo` 重定位（Harvard 上 `lw` 读不到 ROM）                       |
+| 缺陷修复     | `mycc/rars.py`、`tools/build.py`                                          | ① `--rars` 原先不对 `runtime.s` 做降级，受限指令集下会漏出 `sltu`；② `switch` 的 `.word` 跳转表落在 `.text` 里，RARS 直接拒绝、硬件也读不到；③ `.logisim.hex` 原先逐字节写出，字宽 ROM 会跑飞 |
+| 预检工具     | `tools/check_logisim.py`（新增）                                          | 零依赖：把镜像反汇编回来检查指令是否都在该 CPU 的译码范围内、容量是否超限                                                                                                                     |
+| 交叉校验     | `tools/check_rars.py`（新增）                                             | 与真 RARS 逐字对照汇编结果，并对同一程序做行为差分；缺 Java 时自动跳过                                                                                                                        |
+| 课堂演示     | `examples/logisim/demo.c`、`demo_pause.c`（新增）                         | 全局数组初值 → 指针遍历累加 → 最大值 → 软件乘 → 软件除 → SLL → XOR，七行可读文本；`demo_pause.c` 是每行后面停一次钟的讲演版                                                                   |
 
 ### 轮次三：I/O 改成标准 RISC-V 系统调用
 
 轮次二把 `ecall` 当成私有协议（`a7=34` 显示十六进制、其它值停机），课堂上演示只能看数码管、
 键盘也无法输入。本轮把 I/O 改成**标准 RISC-V 系统调用约定**，与 RARS 完全一致：
 
-| 主题         | 位置                                           | 内容                                                                                                                                                                        |
-| ------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 主题         | 位置                                         | 内容                                                                                                                                                    |
+| ------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 系统调用约定 | `mycc/rars.py`                               | `a7` 选服务号、参数与返回值在 `a0`：`10`=退出、`11`=打印一个字符、`12`=读一个字符。`putchar`/`getchar`/`exit` 三个存根就三行 `addi a7,zero,N` + `ecall` |
-| 分层修正     | `runtime/io.c`、`mycc/rars.py`             | `printint`/`printhex` 不再是"系统调用变形"，它们是用 `putchar` 写的普通 C 函数，随镜像内联；硬件只需认"打一个字符"                                                    |
-| 符号驱动链接 | `mycc/rars.py`                               | 多个翻译单元合并时统一给局部标号加前缀（`_relabel`），并按引用关系做段级 GC（`_drop_unreferenced`），镜像只留下真正用到的运行时函数                                     |
-| 门禁         | `tests/test_logisim.py`                      | 断言 `a7=11/12` 的存根、`printint`/`printhex` 是真函数而非 shim、合并后标号唯一、GC 不删跨块跳转目标                                                                  |
-| 硬件指南     | `adapters/logisim/HARDWARE-REUSE.md`（新增） | 复用现有的 `ecall` 输出电路：改常量 `0x22`→`0x0a` 并拆反相器（停机条件）→ TTY 接 Write Enable（输出）→ 键盘 + 三个选择器（输入），附引脚表与排查表                 |
+| 分层修正     | `runtime/io.c`、`mycc/rars.py`               | `printint`/`printhex` 不再是"系统调用变形"，它们是用 `putchar` 写的普通 C 函数，随镜像内联；硬件只需认"打一个字符"                                      |
+| 符号驱动链接 | `mycc/rars.py`                               | 多个翻译单元合并时统一给局部标号加前缀（`_relabel`），并按引用关系做段级 GC（`_drop_unreferenced`），镜像只留下真正用到的运行时函数                     |
+| 门禁         | `tests/test_logisim.py`                      | 断言 `a7=11/12` 的存根、`printint`/`printhex` 是真函数而非 shim、合并后标号唯一、GC 不删跨块跳转目标                                                    |
+| 硬件指南     | `adapters/logisim/HARDWARE-REUSE.md`（新增） | 复用现有的 `ecall` 输出电路：改常量 `0x22`→`0x0a` 并拆反相器（停机条件）→ TTY 接 Write Enable（输出）→ 键盘 + 三个选择器（输入），附引脚表与排查表      |
 
 ### 轮次四：字符串字面量与 `printf` / `scanf`
 
 前三轮里写文本只能用 `int` 数组加字符字面量，输出只能 `printint`/`printhex`。本轮补上
 真实 C 代码需要的表达力，**不动硬件、不引入变参 ABI**：
 
-| 主题         | 位置                                                               | 内容                                                                                                                                                                                                                                         |
-| ------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 字符串字面量 | `mycc/core/lexer.py`、`parser.py`、`sema.py`、`codegen.py` | `"abc"` 解码成 `int` 数组落进 `.data`（Harvard 上 `lw` 只到 RAM），类型为 `int*`；相同字面量共用一个标号；非法转义、未闭合、非 ASCII 分别报错                                                                                      |
-| 格式串降级   | `mycc/core/sema.py`、`codegen.py`                              | `printf`/`scanf` 在**编译期**解析：`%d`→`printint`、`%x`→`printhex`、`%c`→`putchar`、`%s`→`printstr`、`scanf` 的 `%d`→`readint`、`%c`→`readchar`。参数个数与类型全部编译期校验，格式串必须是字面量 |
-| 运行时助手   | `runtime/io.c`、`runtime/input.c`（新增）                      | `printstr`、`readint`、`readchar` 用 C 写在 `putchar`/`getchar` 之上。输入助手单独成文件，因为板卡 / QEMU / CPU21 端口没有键盘                                                                                                     |
-| 门禁         | `tests/test_formatting.py`（新增）                               | 字面量入数据段与去重、每个转换对应一个助手调用、8 种格式错误诊断、真实 RISC-V 上的端到端输出比对                                                                                                                                             |
-| 演示程序     | `examples/logisim/knapsack.c`（新增）                            | 0/1 背包（洛谷 P1048 同型）：`scanf` 读入、二重循环逆序递推、`imax` 函数调用、`printf` 输出。ROM 964 字 / RAM 660 字节（v3.0 优化后为 956 / 644）                                                                                                                 |
+| 主题         | 位置                                                       | 内容                                                                                                                                                                                               |
+| ------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 字符串字面量 | `mycc/core/lexer.py`、`parser.py`、`sema.py`、`codegen.py` | `"abc"` 解码成 `int` 数组落进 `.data`（Harvard 上 `lw` 只到 RAM），类型为 `int*`；相同字面量共用一个标号；非法转义、未闭合、非 ASCII 分别报错                                                      |
+| 格式串降级   | `mycc/core/sema.py`、`codegen.py`                          | `printf`/`scanf` 在**编译期**解析：`%d`→`printint`、`%x`→`printhex`、`%c`→`putchar`、`%s`→`printstr`、`scanf` 的 `%d`→`readint`、`%c`→`readchar`。参数个数与类型全部编译期校验，格式串必须是字面量 |
+| 运行时助手   | `runtime/io.c`、`runtime/input.c`（新增）                  | `printstr`、`readint`、`readchar` 用 C 写在 `putchar`/`getchar` 之上。输入助手单独成文件，因为板卡 / QEMU / CPU21 端口没有键盘                                                                     |
+| 门禁         | `tests/test_formatting.py`（新增）                         | 字面量入数据段与去重、每个转换对应一个助手调用、8 种格式错误诊断、真实 RISC-V 上的端到端输出比对                                                                                                   |
+| 演示程序     | `examples/logisim/knapsack.c`（新增）                      | 0/1 背包（洛谷 P1048 同型）：`scanf` 读入、二重循环逆序递推、`imax` 函数调用、`printf` 输出。ROM 964 字 / RAM 660 字节（v3.0 优化后为 956 / 644）                                                  |
 
 ### 轮次五（v3.0）：走查修复与体积优化（2026-11-01）
 
@@ -83,67 +83,65 @@ v3.0 是 v2.0 的质量迭代：按第二轮代码走查逐条修复，并压缩
 
 #### 修复
 
-| 问题 | 修复 | 位置 |
-|---|---|---|
-| `sizeof(数组)` 作为数组长度被提前折叠成 4 | 数组边界移到 sema 的 `resolve_array()`，按真实类型求值 | `mycc/core/parser.py`、`sema.py` |
-| `--rars --no-lui` 的全局/字符串地址错（读到错误变量） | 检测 `.Lpc_` 地址池并明确拒绝（64），不再把 `.word` 搬走却留下 `lw 8(rd)` | `mycc/rars.py`、`cli.py` |
-| 精简 ISA 下 `__mv_*` 助手重复/丢失 | 各单元编译后剥离助手，合并后只 `lower_assembly` 一次；已有助手时不重复追加 | `mycc/rars.py`、`codegen.py` |
-| `--logisim` 可写出含 `lui` 的非课堂镜像；超 1024 字也照写 | 新增 `validate_image()`（ISA + 1024 字 ROM + 1024 字节 RAM）；`--logisim` 必须配 `--target logisim` | `mycc/encode.py`、`cli.py`、`rars.py` |
-| `scanf` 把格式串里的普通文本打印到 stdout | `scanf` 不再生成 text 计划；普通字面量报 `E-SEMA-FORMAT`，只允许空白分隔 | `mycc/core/sema.py`、`codegen.py` |
-| 非法 `--stack-top` 触发 ICE（退出码 2） | 捕获 `ValueError`，返回 64 | `mycc/cli.py` |
-| `images()` 默认不装 `sp`，硬件首压栈写 `0xFFFFFFF0` | `logisim` profile 默认 `stack_top=1024` | `mycc/rars.py` |
-| `int *p[2]` 被静默当成 `int[2]` | 声明符已有 `*` 时遇到 `[` 报 `E-UNSUPPORTED-CONSTRUCT` | `mycc/core/parser.py` |
-| 递归 `main` 调用落到入口存根 | 重命名 `main` 后，同时把 `jal ...,main` 改成 `__mycc_main` | `mycc/rars.py` |
-| `tools/check.py` 的 logisim 成功提示不可达；未接入 RARS 对照 | 修正缩进，logisim 之后调用 `check_rars`（无 jar 自动跳过） | `tools/check.py`、`check_rars.py` |
-| `_io_unit` 编译失败时对 `Diagnostic` 做 `''.join` | 改用 `format_diagnostic` | `mycc/rars.py` |
-| GUI 单条指令设置触发 `normalize_capabilities` KeyError | `GROUPS.get(name,{name})`；设置文件改为原子写 | `mycc/gui/workbench.py` |
-| GUI 版本/标题硬编码；新建/保存后标题不更新 | 使用 `__version__`/`PySide6.__version__`；新建/保存后更新标题 | `mycc/gui/views.py` |
-| Ctrl+加号无法放大（美式键盘上 `Ctrl++` 实际是 Ctrl+Shift+'='） | 应用级事件过滤器按物理键处理 `Ctrl+'+'`/`'-'`，菜单同时注册 `Ctrl++`、`Ctrl+=`、`Ctrl+Shift+=` | `mycc/gui/views.py` |
-| RARS jar 测试写死 `D:\Desktop\...`；一个测试用了不支持的 `?:` | 改用 `MYCC_RARS_JAR` 或 `tools/rars.jar`；测试源改为 `if`；精简 profile 测试补 `assemble` | `tests/` |
-| 版本此前仍为 0.3.0；示例注释/统计过时 | 统一为 **3.0.0**；更新 README、demo 注释、RARS 工具说明 | 全文 |
+| 问题                                                           | 修复                                                                                                | 位置                                  |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `sizeof(数组)` 作为数组长度被提前折叠成 4                      | 数组边界移到 sema 的 `resolve_array()`，按真实类型求值                                              | `mycc/core/parser.py`、`sema.py`      |
+| `--rars --no-lui` 的全局/字符串地址错（读到错误变量）          | 检测 `.Lpc_` 地址池并明确拒绝（64），不再把 `.word` 搬走却留下 `lw 8(rd)`                           | `mycc/rars.py`、`cli.py`              |
+| 精简 ISA 下 `__mv_*` 助手重复/丢失                             | 各单元编译后剥离助手，合并后只 `lower_assembly` 一次；已有助手时不重复追加                          | `mycc/rars.py`、`codegen.py`          |
+| `--logisim` 可写出含 `lui` 的非课堂镜像；超 1024 字也照写      | 新增 `validate_image()`（ISA + 1024 字 ROM + 1024 字节 RAM）；`--logisim` 必须配 `--target logisim` | `mycc/encode.py`、`cli.py`、`rars.py` |
+| `scanf` 把格式串里的普通文本打印到 stdout                      | `scanf` 不再生成 text 计划；普通字面量报 `E-SEMA-FORMAT`，只允许空白分隔                            | `mycc/core/sema.py`、`codegen.py`     |
+| 非法 `--stack-top` 触发 ICE（退出码 2）                        | 捕获 `ValueError`，返回 64                                                                          | `mycc/cli.py`                         |
+| `images()` 默认不装 `sp`，硬件首压栈写 `0xFFFFFFF0`            | `logisim` profile 默认 `stack_top=1024`                                                             | `mycc/rars.py`                        |
+| `int *p[2]` 被静默当成 `int[2]`                                | 声明符已有 `*` 时遇到 `[` 报 `E-UNSUPPORTED-CONSTRUCT`                                              | `mycc/core/parser.py`                 |
+| 递归 `main` 调用落到入口存根                                   | 重命名 `main` 后，同时把 `jal ...,main` 改成 `__mycc_main`                                          | `mycc/rars.py`                        |
+| `tools/check.py` 的 logisim 成功提示不可达；未接入 RARS 对照   | 修正缩进，logisim 之后调用 `check_rars`（无 jar 自动跳过）                                          | `tools/check.py`、`check_rars.py`     |
+| `_io_unit` 编译失败时对 `Diagnostic` 做 `''.join`              | 改用 `format_diagnostic`                                                                            | `mycc/rars.py`                        |
+| GUI 单条指令设置触发 `normalize_capabilities` KeyError         | `GROUPS.get(name,{name})`；设置文件改为原子写                                                       | `mycc/gui/workbench.py`               |
+| GUI 版本/标题硬编码；新建/保存后标题不更新                     | 使用 `__version__`/`PySide6.__version__`；新建/保存后更新标题                                       | `mycc/gui/views.py`                   |
+| Ctrl+加号无法放大（美式键盘上 `Ctrl++` 实际是 Ctrl+Shift+'='） | 应用级事件过滤器按物理键处理 `Ctrl+'+'`/`'-'`，菜单同时注册 `Ctrl++`、`Ctrl+=`、`Ctrl+Shift+=`      | `mycc/gui/views.py`                   |
+| RARS jar 测试写死 `D:\Desktop\...`；一个测试用了不支持的 `?:`  | 改用 `MYCC_RARS_JAR` 或 `tools/rars.jar`；测试源改为 `if`；精简 profile 测试补 `assemble`           | `tests/`                              |
+| 版本此前仍为 0.3.0；示例注释/统计过时                          | 统一为 **3.0.0**；更新 README、demo 注释、RARS 工具说明                                             | 全文                                  |
 
 #### 优化
 
-| 优化 | 效果 |
-|---|---|
-| `_io_unit` 按 profile 缓存 | `check_logisim` 的 11 个示例只编译一次 `io.c`/`input.c`（22 次 → 2 次） |
-| `printhex` 用 `i << 2` 代替 `i * 4` | 只打印十六进制的程序不再需要 `__mulsi3`；`hello.c` ROM 462 → 450 字 |
-| `.Lsigned_div` 移入 `__divsi3` 段 | 只用 `/`/`%` 的程序不再被迫带 `__mulsi3` |
-| `lower_assembly` 保存 10 个寄存器（原 16 个）、48 字节栈帧（原 64） | 每条降级指令少 12 条保存/恢复指令；精简 profile 的 ROM 与时间下降 |
-| `_drop_unreferenced` 用一次 `Counter` 计数 | 从 O(块数 × 全文) 降为线性；小 ROM 的 GC 更快 |
-| CLI 镜像预检 | 超容量/越界在写出前失败，不再生成跑飞的 ROM |
-| 设置文件临时文件 + `replace` | 断电/磁盘满不留下半个 `gui.json` |
-| `check.py` 接入 RARS | 编码逐字对照与行为差分纳入常规检查（有 jar 时） |
+| 优化                                                                | 效果                                                                    |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `_io_unit` 按 profile 缓存                                          | `check_logisim` 的 11 个示例只编译一次 `io.c`/`input.c`（22 次 → 2 次） |
+| `printhex` 用 `i << 2` 代替 `i * 4`                                 | 只打印十六进制的程序不再需要 `__mulsi3`；`hello.c` ROM 462 → 450 字     |
+| `.Lsigned_div` 移入 `__divsi3` 段                                   | 只用 `/`/`%` 的程序不再被迫带 `__mulsi3`                                |
+| `lower_assembly` 保存 10 个寄存器（原 16 个）、48 字节栈帧（原 64） | 每条降级指令少 12 条保存/恢复指令；精简 profile 的 ROM 与时间下降       |
+| `_drop_unreferenced` 用一次 `Counter` 计数                          | 从 O(块数 × 全文) 降为线性；小 ROM 的 GC 更快                           |
+| CLI 镜像预检                                                        | 超容量/越界在写出前失败，不再生成跑飞的 ROM                             |
+| 设置文件临时文件 + `replace`                                        | 断电/磁盘满不留下半个 `gui.json`                                        |
+| `check.py` 接入 RARS                                                | 编码逐字对照与行为差分纳入常规检查（有 jar 时）                         |
 
 Logisim 镜像体积（修改前 → 修改后，字）：`hello 462→450`、`shifts 319→272`、`knapsack 964→956`、`arrays 473→463`、`control 411→401`、`fib 350→340`、`pointers 414→404`；`demo` 保持 771。背包 RAM 660 → 644 字节。11 个示例预检 0 问题（ROM 272~956 / 上限 1024）。
 
 #### 行为收紧
 
-| 场景 | v2.0 | v3.0 |
-|---|---|---|
-| `--rars` + 无 `lui` + 全局/字符串 | 生成地址错误的 listing | 明确报错 64；改用 `--target logisim` 或保留 `lui` |
-| `scanf` 格式串含普通文本（如 `"X%d"`） | 把 `X` 打印到 stdout | `E-SEMA-FORMAT`；只支持 `%d/%c` 与空白 |
-| `int *p[2]` | 静默按 `int[2]` 编译 | `E-UNSUPPORTED-CONSTRUCT` |
-| `--logisim` 未指定 `--target logisim` | 写出含 `lui` 的镜像 | 返回 64 并提示加 `--target logisim` |
-| `--stack-top` 超出 32 位 | ICE（2） | 用法错误（64） |
-| Logisim ROM/RAM 超限 | 静默写出 | 64，提示具体超限 |
+| 场景                                   | v2.0                   | v3.0                                              |
+| -------------------------------------- | ---------------------- | ------------------------------------------------- |
+| `--rars` + 无 `lui` + 全局/字符串      | 生成地址错误的 listing | 明确报错 64；改用 `--target logisim` 或保留 `lui` |
+| `scanf` 格式串含普通文本（如 `"X%d"`） | 把 `X` 打印到 stdout   | `E-SEMA-FORMAT`；只支持 `%d/%c` 与空白            |
+| `int *p[2]`                            | 静默按 `int[2]` 编译   | `E-UNSUPPORTED-CONSTRUCT`                         |
+| `--logisim` 未指定 `--target logisim`  | 写出含 `lui` 的镜像    | 返回 64 并提示加 `--target logisim`               |
+| `--stack-top` 超出 32 位               | ICE（2）               | 用法错误（64）                                    |
+| Logisim ROM/RAM 超限                   | 静默写出               | 64，提示具体超限                                  |
 
 #### v3.0 验证（2026-11-01）
 
-| 项目 | 结果 |
-|---|---|
-| `python -m compileall -q mycc adapters tools runtime` | 退出码 0 |
-| `python -m pytest -q` | **172 passed, 13 skipped**（skip 为 RARS/CPU21/外部工具链缺失） |
-| `python -m tools.check_logisim` | 13 个程序，0 问题（ROM 272~956；RAM ≤ 644 字节） |
-| `python -m tools.check_docs` / `check_architecture` | 通过 |
-| `python -m mycc --version` | `mycc 3.0.0` |
-| RV32I 解释器运行 | `demo` 七行输出正确；`printf` → `hello 42 0x000000ff A ok`；`scanf` 输入 `17 25` → `17+25=42`；控制流/指针/`sizeof`/`INT_MIN` → `8/20/12/-2147483648` |
-| GUI 缩放快捷键 | QTest 验证 `Ctrl+Shift+'='`、`Ctrl+'='`、`Ctrl+'-'` 均改变编辑器字号 |
-| CLI 错误路径 | 无 lui 的 RARS、缺 target 的 `--logisim`、非法 `--stack-top`、2422 字 ROM 均返回 64 |
+| 项目                                                  | 结果                                                                                                                                                  |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m compileall -q mycc adapters tools runtime` | 退出码 0                                                                                                                                              |
+| `python -m pytest -q`                                 | **172 passed, 13 skipped**（skip 为 RARS/CPU21/外部工具链缺失）                                                                                       |
+| `python -m tools.check_logisim`                       | 13 个程序，0 问题（ROM 272~956；RAM ≤ 644 字节）                                                                                                      |
+| `python -m tools.check_docs` / `check_architecture`   | 通过                                                                                                                                                  |
+| `python -m mycc --version`                            | `mycc 3.0.0`                                                                                                                                          |
+| RV32I 解释器运行                                      | `demo` 七行输出正确；`printf` → `hello 42 0x000000ff A ok`；`scanf` 输入 `17 25` → `17+25=42`；控制流/指针/`sizeof`/`INT_MIN` → `8/20/12/-2147483648` |
+| GUI 缩放快捷键                                        | QTest 验证 `Ctrl+Shift+'='`、`Ctrl+'='`、`Ctrl+'-'` 均改变编辑器字号                                                                                  |
+| CLI 错误路径                                          | 无 lui 的 RARS、缺 target 的 `--logisim`、非法 `--stack-top`、2422 字 ROM 均返回 64                                                                   |
 
 限制：本机没有 RARS jar，`tools.check_rars` 与 `test_formatting` 的 RARS 端到端用例按设计跳过；CPU21/Vivado 回归未在本环境执行。`pytest` 在受限沙箱中需把 basetemp 指到工作区（pytest 自建 0o700 临时目录会被沙箱 ACL 拒绝），这是环境限制，项目代码未依赖该修补。
-
-
 
 ### 轮次六（v3.1）：IDE 化工作台（2026-11-01）
 
@@ -162,22 +160,22 @@ v3.1 把工作台从“能编译的窗口”升级为可日常使用的 IDE 式�
 
 #### 全部 CLI 开关的 GUI 对应
 
-| CLI 开关 | GUI 位置 |
-|---|---|
-| `source.c` | 文件 → 打开 / 编辑器 |
-| `-o PATH` | 构建与输出 → 输出路径（文件或文件夹）+ “编译成功后写入” |
-| `--target generic/cpu21/logisim` | 构建与输出 → 目标（切换目标会自动切 profile 和输出格式） |
-| `--rars` / `--logisim` | 构建与输出 → RARS 单文件 / Logisim 镜像 |
-| `--stack-top N` | 构建与输出 → 栈顶 |
-| `--profile P` | 指令集 → Profile |
-| `--isa-file JSON` | 指令集 → ISA 文件 |
-| `--enable` / `--disable` | 指令集 → 组复选框；更细粒度用“自定义单条指令…” |
-| `--no-lui` / `--no-vshift` | 指令集 → 兼容开关（与取消 `lui`/`vshift` 等价） |
-| `--dump-tokens/ast/ir/lowering-report` | 输出与外观 → 显示对应输出页 |
-| `--dump-isa` / `--dump-isa-whitelist` | 输出与外观 → 命令包含；ISA 详情查看清单/白名单 |
-| `--stats` | 输出与外观 → 显示各阶段耗时 |
-| `--doctor` | 构建 → 环境自检… |
-| `--version` / `--help` / `--gui` | 帮助 → 关于 / 帮助 → CLI 开关对照 / 当前窗口 |
+| CLI 开关                               | GUI 位置                                                 |
+| -------------------------------------- | -------------------------------------------------------- |
+| `source.c`                             | 文件 → 打开 / 编辑器                                     |
+| `-o PATH`                              | 构建与输出 → 输出路径（文件或文件夹）+ “编译成功后写入”  |
+| `--target generic/cpu21/logisim`       | 构建与输出 → 目标（切换目标会自动切 profile 和输出格式） |
+| `--rars` / `--logisim`                 | 构建与输出 → RARS 单文件 / Logisim 镜像                  |
+| `--stack-top N`                        | 构建与输出 → 栈顶                                        |
+| `--profile P`                          | 指令集 → Profile                                         |
+| `--isa-file JSON`                      | 指令集 → ISA 文件                                        |
+| `--enable` / `--disable`               | 指令集 → 组复选框；更细粒度用“自定义单条指令…”           |
+| `--no-lui` / `--no-vshift`             | 指令集 → 兼容开关（与取消 `lui`/`vshift` 等价）          |
+| `--dump-tokens/ast/ir/lowering-report` | 输出与外观 → 显示对应输出页                              |
+| `--dump-isa` / `--dump-isa-whitelist`  | 输出与外观 → 命令包含；ISA 详情查看清单/白名单           |
+| `--stats`                              | 输出与外观 → 显示各阶段耗时                              |
+| `--doctor`                             | 构建 → 环境自检…                                         |
+| `--version` / `--help` / `--gui`       | 帮助 → 关于 / 帮助 → CLI 开关对照 / 当前窗口             |
 
 “命令预览”会按当前设置生成等价的 `python -m mycc …` 命令并支持一键复制，方便在终端复现；目标为 Logisim 时自动带上 `--stack-top`/`--target logisim`，RARS 时带上 `--rars`，`--no-lui`/`--no-vshift` 也会显示为别名而不是冗长的 `--disable`。
 
@@ -190,39 +188,35 @@ v3.1 把工作台从“能编译的窗口”升级为可日常使用的 IDE 式�
 - v3.1 当前：**196 passed / 2 skipped**、`tools.check_logisim` 13 个程序 0 问题、`tools.check_docs` 与 `tools.check_architecture` 通过；主题切换与行号滚动在 QTest/offscreen 下验证；`python -m mycc --version` 输出 **3.1.0**。
 - 限制：本机无 RARS jar，RARS 端到端仍按设计跳过；CPU21/Vivado 未在本环境执行。
 
-
-
 ### 轮次七（v3.1 演示与 GUI 修复，2026-11-02）
 
 面向课堂演示的一轮修复，交互行为都在 offscreen Qt 下逐项验证：
 
-| 主题 | 位置 | 内容 |
-|---|---|---|
-| 行号跟随滚动 | `mycc/gui/views.py` | 行号栏是独立控件，原先只在 `textChanged`/`cursorPositionChanged` 时同步；新增 `sync_number_scroll()` 并接到 `verticalScrollBar().valueChanged`，滚轮、拖动、翻页时行号与正文一起移动 |
-| 滚轮防误改选项 | `mycc/gui/views.py` | `WHEEL_GUARDED`（`QComboBox`/`QCheckBox`/`QRadioButton`/`QAbstractSpinBox`/`QSlider`）上的滚轮事件一律拦截并转发给外层滚动区：不再误改 profile/目标/主题，侧栏仍可正常滚动；侧栏每个值控件另装一次过滤器兜底 |
-| 自定义指令可回退 | `mycc/gui/workbench.py`、`mycc/gui/views.py` | 新增 `capability_snapshot()`（不抛异常、不做可行性校验）并导出 `core.expand`；ISA 非法（关掉 MV-ISA、ISA 文件损坏、设置里的旧项）时对话框仍能打开并提示如何修正；点“确定”若缺少 MV-ISA 必需指令，会列出缺失项并退回对话框 |
-| 课堂演示脚本 | `demo.cmd`（新增） | 九段交互菜单（`demo.cmd a` 连播、`demo.cmd 3` 单段彩排），覆盖环境自检、ISA 数量、软件/硬件乘法对比、`--no-vshift` 代价、一键镜像、镜像预检、回归全绿、启动工作台 |
-| 新增示例 | `examples/logisim/hannuo.c`、`examples/logisim/hello world.c` | 汉诺塔（`scanf` + `printf`，Logisim ROM 724 字）与最小 `printf("hello world")`（ROM 81 字）；`tools.check_logisim` 现覆盖 13 个程序 |
-| 代码风格 | `mycc/core/`、`mycc/gui/` | 统一为 black 风格排版（仅格式，无行为变化） |
-| 示例调整 | `examples/compiler/compiler_demo.c` | 追加 `j = j << 10` 一行用于演示移位；保持 C 子集可编译（本子集不接受 `int i,j=1;` 这类逗号多声明符） |
+| 主题             | 位置                                                          | 内容                                                                                                                                                                                                                      |
+| ---------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 行号跟随滚动     | `mycc/gui/views.py`                                           | 行号栏是独立控件，原先只在 `textChanged`/`cursorPositionChanged` 时同步；新增 `sync_number_scroll()` 并接到 `verticalScrollBar().valueChanged`，滚轮、拖动、翻页时行号与正文一起移动                                      |
+| 滚轮防误改选项   | `mycc/gui/views.py`                                           | `WHEEL_GUARDED`（`QComboBox`/`QCheckBox`/`QRadioButton`/`QAbstractSpinBox`/`QSlider`）上的滚轮事件一律拦截并转发给外层滚动区：不再误改 profile/目标/主题，侧栏仍可正常滚动；侧栏每个值控件另装一次过滤器兜底              |
+| 自定义指令可回退 | `mycc/gui/workbench.py`、`mycc/gui/views.py`                  | 新增 `capability_snapshot()`（不抛异常、不做可行性校验）并导出 `core.expand`；ISA 非法（关掉 MV-ISA、ISA 文件损坏、设置里的旧项）时对话框仍能打开并提示如何修正；点“确定”若缺少 MV-ISA 必需指令，会列出缺失项并退回对话框 |
+| 课堂演示脚本     | `demo.cmd`（新增）                                            | 九段交互菜单（`demo.cmd a` 连播、`demo.cmd 3` 单段彩排），覆盖环境自检、ISA 数量、软件/硬件乘法对比、`--no-vshift` 代价、一键镜像、镜像预检、回归全绿、启动工作台                                                         |
+| 新增示例         | `examples/logisim/hannuo.c`、`examples/logisim/hello world.c` | 汉诺塔（`scanf` + `printf`，Logisim ROM 724 字）与最小 `printf("hello world")`（ROM 81 字）；`tools.check_logisim` 现覆盖 13 个程序                                                                                       |
+| 代码风格         | `mycc/core/`、`mycc/gui/`                                     | 统一为 black 风格排版（仅格式，无行为变化）                                                                                                                                                                               |
+| 示例调整         | `examples/compiler/compiler_demo.c`                           | 追加 `j = j << 10` 一行用于演示移位；保持 C 子集可编译（本子集不接受 `int i,j=1;` 这类逗号多声明符）                                                                                                                      |
 
 验证：`pytest` **196 passed / 2 skipped**；`tools.check_logisim` 13 个程序 0 问题（ROM 272~956 / 上限 1024，RAM ≤ 644 字节）；`check_docs`、`check_architecture` 通过；行号同步与滚轮拦截在 offscreen Qt 下验证。
-
-
 
 ### 本分支做成了什么
 
 一句话：**把一个“能编译 hello world”的教学编译器，変成一个能在真实自建 RISC-V 硬件上跑非平凡 C 程序的编译器，并且全程零手写汇编。**
 
-| 维度       | `8a5d050`（起点）                 | `v3.1-ide`（现在）                                                                                             |
-| ---------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 目标平台   | 只产 GNU 汇编，需外部链接器         | 5 个可执行环境：通用、QEMU、CPU21 板卡、**Logisim 课堂 CPU**、**RARS**                          |
-| 镜像导出   | 无                                  | 命令行一条命令直出 `v2.0 raw` 的 ROM/RAM 镜像，不依赖 Java、不依赖 GNU 工具链                             |
-| I/O        | 只能输出；每次 ecall 都停机         | **标准 RISC-V 系统调用**（`a7=10/11/12`），打印与读键盘都不停机，同一份 `.asm` 丢进 RARS 行为一致 |
-| 文本       | 不支持字符串，只能手写 `int` 数组 | **字符串字面量**（`.data` 里去重存放）                                                              |
-| 格式化 I/O | 只能 `printint`/`printhex`      | **`printf` / `scanf`**，编译期展开、参数全程校验                                                  |
-| 硬件验证   | 无                                  | 在自己的 Logisim CPU 上**实测通过**：`printf` 上屏、`getchar` 读键盘、0/1 背包 DP 算出正确答案    |
-| 测试       | —                                  | **185 个自动化测试**，语句覆盖 **91%**，含与真 RARS 的逐字编码对照                              |
+| 维度       | `8a5d050`（起点）                 | `v3.1-ide`（现在）                                                                                |
+| ---------- | --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 目标平台   | 只产 GNU 汇编，需外部链接器       | 5 个可执行环境：通用、QEMU、CPU21 板卡、**Logisim 课堂 CPU**、**RARS**                            |
+| 镜像导出   | 无                                | 命令行一条命令直出 `v2.0 raw` 的 ROM/RAM 镜像，不依赖 Java、不依赖 GNU 工具链                     |
+| I/O        | 只能输出；每次 ecall 都停机       | **标准 RISC-V 系统调用**（`a7=10/11/12`），打印与读键盘都不停机，同一份 `.asm` 丢进 RARS 行为一致 |
+| 文本       | 不支持字符串，只能手写 `int` 数组 | **字符串字面量**（`.data` 里去重存放）                                                            |
+| 格式化 I/O | 只能 `printint`/`printhex`        | **`printf` / `scanf`**，编译期展开、参数全程校验                                                  |
+| 硬件验证   | 无                                | 在自己的 Logisim CPU 上**实测通过**：`printf` 上屏、`getchar` 读键盘、0/1 背包 DP 算出正确答案    |
+| 测试       | —                                 | **185 个自动化测试**，语句覆盖 **91%**，含与真 RARS 的逐字编码对照                                |
 
 四个技术难点都是“现有工具里没有现成答案”的：
 
@@ -235,16 +229,16 @@ v3.1 把工作台从“能编译的窗口”升级为可日常使用的 IDE 式�
 
 > 以下为 v2.0 当时的结果记录；v3.0 的记录为 172 passed / 13 skipped，当前结果（196 passed / 2 skipped、ROM 272~956 等）见上方“轮次六”与“轮次七”。
 
-| 项目                   | 结果                                                                                                     |
-| ---------------------- | -------------------------------------------------------------------------------------------------------- |
-| `\check.cmd`         | `171 passed, 1 skipped`，退出码 0                                                                      |
-| 覆盖率                 | 语句 91%，门槛通过                                                                                       |
-| 架构与文档门禁         | `architecture: ok`、`docs: preset table and JSON reference sets agree with core/isa.py`              |
-| Logisim 镜像预检       | 11 个程序 0 问题（ROM 319~964 字 / 上限 1024；RAM ≤ 660 字节 / 上限 1024；v3.0 优化后为 272~956 / 644）                              |
-| 编码器 vs 真 RARS      | 10 程序 × 3 指令集 = 30/30 逐字一致（新增示例前跑得的结果）                                             |
-| 行为差分               | 同程序按 24 条指令集与 PF-01 编译，RARS 输出 10/10 相同（同上）                                          |
-| CPU21 真实 RTL 回归    | 18/18 通过，外部 FPGA 工程 84 个文件只读未变更                                                           |
-| **Logisim 实机** | 本次实测：`printf` 上屏、`getchar` 读键盘、0/1 背包输出 `max value for cap 70 = 3`（与 RARS 一致） |
+| 项目                | 结果                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `\check.cmd`        | `171 passed, 1 skipped`，退出码 0                                                                       |
+| 覆盖率              | 语句 91%，门槛通过                                                                                      |
+| 架构与文档门禁      | `architecture: ok`、`docs: preset table and JSON reference sets agree with core/isa.py`                 |
+| Logisim 镜像预检    | 11 个程序 0 问题（ROM 319~964 字 / 上限 1024；RAM ≤ 660 字节 / 上限 1024；v3.0 优化后为 272~956 / 644） |
+| 编码器 vs 真 RARS   | 10 程序 × 3 指令集 = 30/30 逐字一致（新增示例前跑得的结果）                                             |
+| 行为差分            | 同程序按 24 条指令集与 PF-01 编译，RARS 输出 10/10 相同（同上）                                         |
+| CPU21 真实 RTL 回归 | 18/18 通过，外部 FPGA 工程 84 个文件只读未变更                                                          |
+| **Logisim 实机**    | 本次实测：`printf` 上屏、`getchar` 读键盘、0/1 背包输出 `max value for cap 70 = 3`（与 RARS 一致）      |
 
 未验证项：本机无 `qemu-riscv32`，执行与 GCC 对照未跑；Logisim 侧目前是行为级验证（指令集、寻址、容量）+ 实机功能验证，未覆盖时序余量与板级电平。
 
@@ -419,15 +413,15 @@ CPU21 需要专门适配，因为它采用 Harvard 结构，ROM/RAM、VGA 协议
 
 ## 实现方式
 
-| 部分       | 当前实现                                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 词法分析   | Python 正则扫描，跳过注释和空白，Token 保存源码位置                                                                             |
-| 语法分析   | 声明/语句用递归下降，表达式按优先级解析，形成 AST                                                                               |
+| 部分       | 当前实现                                                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 词法分析   | Python 正则扫描，跳过注释和空白，Token 保存源码位置                                                                           |
+| 语法分析   | 声明/语句用递归下降，表达式按优先级解析，形成 AST                                                                             |
 | 语义分析   | 函数与块作用域、符号和类型检查、调用及控制流约束；直接无终止递归（每条路径都再次调用自身）报 `W-SEMA-INFINITE-RECURSION` 警告 |
-| 数据与调用 | 32 位 int、单层 int 指针、一维数组，ILP32 数据/调用约定                                                                         |
-| 代码生成   | 遍历 AST 直接输出汇编；栈保存局部值及中间结果，s0 帧指针、16 字节栈对齐、a0–a7 参数寄存器                                      |
-| ISA 回退   | 根据能力选择硬件指令、等价指令序列或运行时辅助调用                                                                              |
-| 结果记录   | Token、AST、IR、Lowering、阶段耗时和诊断放入结果对象                                                                            |
+| 数据与调用 | 32 位 int、单层 int 指针、一维数组，ILP32 数据/调用约定                                                                       |
+| 代码生成   | 遍历 AST 直接输出汇编；栈保存局部值及中间结果，s0 帧指针、16 字节栈对齐、a0–a7 参数寄存器                                     |
+| ISA 回退   | 根据能力选择硬件指令、等价指令序列或运行时辅助调用                                                                            |
+| 结果记录   | Token、AST、IR、Lowering、阶段耗时和诊断放入结果对象                                                                          |
 
 当前是便于检查的直接代码生成器，没有独立优化器或复杂寄存器分配器。**IR 页面是代码生成过程中的结构化记录**，不是经优化后再交给独立后端的完整中间语言流水线。
 
@@ -490,10 +484,10 @@ CLI 退出码：`0` 成功，`1` 编译失败，`2` 内部错误，`64` 参数/I
 
 ## 外部运行与验证
 
-| 环境                                          | 所需工具                                                       | 提供内容和边界                                                                             |
-| --------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 环境                                           | 所需工具                                                       | 提供内容和边界                                                                             |
+| ---------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [CPU21](adapters/cpu21/README.md)              | RISC-V GNU 工具；RTL 回归另需 Vivado xvlog/xelab/xsim 和原 RTL | Harvard 启动、VGA、栈保护、MMIO 校验、ROM 导出；尚无物理上板证据                           |
-| [Logisim 课堂 CPU](adapters/logisim/README.md) | **无**（自带汇编器与镜像编码器）                         | 译码 31 条（设计报告表 1.1）、1024 字 ROM / 1024 字节 RAM、无链接器；直接输出 ROM/RAM 镜像 |
+| [Logisim 课堂 CPU](adapters/logisim/README.md) | **无**（自带汇编器与镜像编码器）                               | 译码 31 条（设计报告表 1.1）、1024 字 ROM / 1024 字节 RAM、无链接器；直接输出 ROM/RAM 镜像 |
 | [generic 裸机](adapters/generic/README.md)     | RISC-V GNU 工具                                                | 统一可读代码/数据空间、占位外设的集成样例，使用前须核对硬件                                |
 | [QEMU](adapters/qemu/README.md)                | RISC-V GNU 工具、qemu-riscv32；对照另需 GCC                    | Linux-user 启动和系统调用，不表示 FPGA 支持这些调用                                        |
 
